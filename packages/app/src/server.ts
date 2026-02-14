@@ -1,6 +1,7 @@
 import { createHTTPServer } from "@trpc/server/adapters/standalone";
 import cors from "cors";
-import { router, app } from "./api/index.js";
+import { app } from "@rotorsoft/es-course-domain";
+import { router } from "./api/index.js";
 
 const server = createHTTPServer({ middleware: cors(), router });
 const port = Number(process.env.PORT) || 4000;

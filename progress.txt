@@ -4,3 +4,9 @@ This file tracks AI-assisted development progress.
 Each entry documents: date, feature, decisions, files changed, tests, and concerns.
 
 ---
+
+[2026-02-14] #1 refactor: Add Orders projection, consolidate builder, add README
+- Files: packages/domain/src/orders.ts (new), packages/domain/src/bootstrap.ts, packages/domain/src/index.ts, packages/domain/test/cart.spec.ts, packages/app/src/api/index.ts, packages/app/src/api/builder.ts (deleted), packages/app/src/server.ts, packages/app/src/dev-server.ts, README.md
+- Changes: Replaced event-log-scanning listOrders with an Orders projection using Act's projection() builder and in-memory read model. Consolidated duplicated app builder from app package into domain bootstrap. Added README.
+- Decisions: Used projection() builder with in-memory Map instead of a state aggregate — projections are side-effect handlers that update external read models, not per-stream aggregates. Auto-drain committed handler lives in app layer (api/index.ts) to avoid race conditions in domain tests.
+- Issues: None
