@@ -1,0 +1,28 @@
+{
+  "name": "@rotorsoft/es-course-root",
+  "version": "0.0.1",
+  "description": "Event-sourced shopping cart — ES Course",
+  "author": "ES Course",
+  "license": "MIT",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.18.0",
+    "pnpm": ">=10.27.0"
+  },
+  "packageManager": "pnpm@10.29.3",
+  "scripts": {
+    "build": "pnpm -r build",
+    "test": "vitest run",
+    "typecheck": "npx tsc --noEmit --project tsconfig.json",
+    "dev": "pnpm -F @rotorsoft/es-course-app dev:api & pnpm -F @rotorsoft/es-course-app dev:client",
+    "start": "pnpm -F @rotorsoft/es-course-app start"
+  },
+  "devDependencies": {
+    "@vitest/coverage-v8": "^4.0.18",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3",
+    "vite": "^7.3.1",
+    "vitest": "^4.0.18"
+  }
+}
