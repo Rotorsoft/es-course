@@ -1,7 +1,8 @@
 import { createHTTPServer } from "@trpc/server/adapters/standalone";
 import cors from "cors";
-import { router, app } from "./api/index.js";
+import { app } from "@rotorsoft/es-course-domain";
 import type { Target } from "@rotorsoft/act";
+import { router } from "./api/index.js";
 
 // Seed data for UI development
 async function seed() {

@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { store, type Target } from "@rotorsoft/act";
-import { app, Cart, Inventory } from "../src/index.js";
+import { app, Cart, Inventory, getOrders, clearOrders } from "../src/index.js";
 
 const target = (stream = crypto.randomUUID()): Target => ({
   stream,
@@ -15,9 +15,18 @@ const sampleItem = (overrides: Partial<{ itemId: string; productId: string; name
   productId: overrides.productId ?? "prod-1",
 });
 
+async function drainAll() {
+  for (let i = 0; i < 10; i++) {
+    const { leased } = await app.correlate({ after: -1, limit: 100 });
+    if (leased.length === 0) break;
+    await app.drain({ streamLimit: 10, eventLimit: 100 });
+  }
+}
+
 describe("Cart", () => {
   beforeEach(async () => {
     await store().seed();
+    clearOrders();
   });
 
   describe("spec: Add Item", () => {
@@ -118,8 +127,7 @@ describe("Cart", () => {
         sampleItem({ itemId: "i1", price: "25.50" })
       );
       await app.do("SubmitCart", t, {});
-      await app.correlate({ after: -1, limit: 100 });
-      await app.drain({ streamLimit: 10, eventLimit: 100 });
+      await drainAll();
       const snap = await app.load(Cart, t.stream);
       expect(snap.state.status).toBe("Published");
     });
@@ -129,6 +137,7 @@ describe("Cart", () => {
 describe("Inventory", () => {
   beforeEach(async () => {
     await store().seed();
+    clearOrders();
   });
 
   it("should import inventory", async () => {
@@ -139,5 +148,58 @@ describe("Inventory", () => {
     });
     const snap = await app.load(Inventory, t.stream);
     expect(snap.state.inventory).toBe(100);
+  });
+});
+
+describe("Orders projection", () => {
+  beforeEach(async () => {
+    await store().seed();
+    clearOrders();
+  });
+
+  it("should materialize order from cart events", async () => {
+    const t = target();
+    await app.do("AddItem", t, sampleItem({ itemId: "i1", price: "10.00" }));
+    await app.do("SubmitCart", t, {});
+    await drainAll();
+
+    const orders = getOrders();
+    const order = orders.find((o) => o.id === t.stream);
+    expect(order).toBeDefined();
+    expect(order!.items).toHaveLength(1);
+    expect(order!.totalPrice).toBe(10.0);
+    expect(order!.submittedAt).toBeDefined();
+  });
+
+  it("should update order status on CartPublished", async () => {
+    const t = target();
+    await app.do("AddItem", t, sampleItem({ itemId: "i1", price: "25.50" }));
+    await app.do("SubmitCart", t, {});
+    await drainAll();
+
+    const orders = getOrders();
+    const order = orders.find((o) => o.id === t.stream);
+    expect(order).toBeDefined();
+    expect(order!.status).toBe("Published");
+    expect(order!.totalPrice).toBe(25.5);
+    expect(order!.submittedAt).toBeDefined();
+    expect(order!.publishedAt).toBeDefined();
+  });
+
+  it("should track multiple orders", async () => {
+    const t1 = target();
+    const t2 = target();
+    await app.do("AddItem", t1, sampleItem({ itemId: "i1", price: "10.00" }));
+    await app.do("AddItem", t2, sampleItem({ itemId: "i2", price: "20.00" }));
+    await app.do("SubmitCart", t1, {});
+    await app.do("SubmitCart", t2, {});
+    await drainAll();
+
+    const orders = getOrders();
+    expect(orders).toHaveLength(2);
+    const o1 = orders.find((o) => o.id === t1.stream);
+    const o2 = orders.find((o) => o.id === t2.stream);
+    expect(o1!.totalPrice).toBe(10.0);
+    expect(o2!.totalPrice).toBe(20.0);
   });
 });

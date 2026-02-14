@@ -1,10 +1,9 @@
-import { Cart, Price, Inventory } from "@rotorsoft/es-course-domain";
+import { Cart, Price, Inventory, getOrders, app } from "@rotorsoft/es-course-domain";
 import type { Target } from "@rotorsoft/act";
 import { EventEmitter } from "node:events";
 import { initTRPC } from "@trpc/server";
 import { tracked } from "@trpc/server";
 import { z } from "zod";
-import { app } from "./builder.js";
 
 const t = initTRPC.create();
 
@@ -40,6 +39,11 @@ function serializeEvents(events: Array<{ id: number; name: unknown; data: unknow
     meta: e.meta as SerializedEvent["meta"],
   }));
 }
+
+// Auto-drain on every commit (processes reactions and projections)
+app.on("committed", () => {
+  app.correlate({ after: -1, limit: 100 }).then(() => app.drain()).catch(console.error);
+});
 
 // Local event bus for SSE subscriptions (decoupled from app's own listeners)
 const eventBus = new EventEmitter();
@@ -166,34 +170,7 @@ export const router = t.router({
   }),
 
   listOrders: t.procedure.query(async () => {
-    const events = await app.query_array({ after: -1 });
-    const orderStreams = new Map<string, { submittedAt?: string; publishedAt?: string }>();
-
-    for (const e of events) {
-      const name = e.name as string;
-      if (name === "CartSubmitted") {
-        if (!orderStreams.has(e.stream)) orderStreams.set(e.stream, {});
-        orderStreams.get(e.stream)!.submittedAt = e.created.toISOString();
-      }
-      if (name === "CartPublished") {
-        if (!orderStreams.has(e.stream)) orderStreams.set(e.stream, {});
-        orderStreams.get(e.stream)!.publishedAt = e.created.toISOString();
-      }
-    }
-
-    return Promise.all(
-      Array.from(orderStreams.entries()).map(async ([stream, info]) => {
-        const snap = await app.load(Cart, stream);
-        return {
-          id: stream,
-          status: snap.state.status,
-          items: snap.state.items,
-          totalPrice: snap.state.totalPrice,
-          submittedAt: info.submittedAt,
-          publishedAt: info.publishedAt,
-        };
-      })
-    );
+    return getOrders();
   }),
 
   // Subscription — push events via SSE
@@ -237,4 +214,3 @@ export const router = t.router({
 });
 
 export type AppRouter = typeof router;
-export { app };
