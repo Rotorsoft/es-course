@@ -1,59 +1,17 @@
 import { state } from "@rotorsoft/act";
+import { mustBeOpen } from "./invariants.js";
 import {
-  mustNotExceedMaxItems,
-  mustHaveItems,
-  mustBeOpen,
-} from "./invariants.js";
-import {
-  AddItem,
-  RemoveItem,
-  ClearCart,
-  RequestToArchiveItem,
-  ArchiveItem,
-  SubmitCart,
+  PlaceOrder,
   PublishCart,
-  ItemAdded,
-  ItemRemoved,
-  CartCleared,
-  ItemArchiveRequested,
-  ItemArchived,
   CartSubmitted,
   CartPublished,
   CartState,
 } from "./schemas.js";
 
 export const Cart = state({ Cart: CartState })
-  .init(() => ({ items: [], status: "Open", totalPrice: 0 }))
-  .emits({
-    ItemAdded,
-    ItemRemoved,
-    CartCleared,
-    ItemArchiveRequested,
-    ItemArchived,
-    CartSubmitted,
-    CartPublished,
-  })
+  .init(() => ({ status: "Open", totalPrice: 0 }))
+  .emits({ CartSubmitted, CartPublished })
   .patch({
-    ItemAdded: ({ data }, state) => ({
-      items: [
-        ...state.items,
-        {
-          itemId: data.itemId,
-          name: data.name,
-          description: data.description,
-          price: data.price,
-          productId: data.productId,
-        },
-      ],
-    }),
-    ItemRemoved: ({ data }, state) => ({
-      items: state.items.filter((i) => i.itemId !== data.itemId),
-    }),
-    CartCleared: () => ({ items: [], status: "Open" }),
-    ItemArchiveRequested: () => ({}),
-    ItemArchived: ({ data }, state) => ({
-      items: state.items.filter((i) => i.itemId !== data.itemId),
-    }),
     CartSubmitted: ({ data }) => ({
       status: "Submitted",
       totalPrice: data.totalPrice,
@@ -63,28 +21,13 @@ export const Cart = state({ Cart: CartState })
       totalPrice: data.totalPrice,
     }),
   })
-  .on({ AddItem })
-  .given([mustNotExceedMaxItems, mustBeOpen])
-  .emit((data) => ["ItemAdded", data])
-  .on({ RemoveItem })
-  .given([mustHaveItems, mustBeOpen])
-  .emit((data) => ["ItemRemoved", data])
-  .on({ ClearCart })
+  .on({ PlaceOrder })
   .given([mustBeOpen])
-  .emit(() => ["CartCleared", {}])
-  .on({ RequestToArchiveItem })
-  .given([mustBeOpen])
-  .emit((data) => ["ItemArchiveRequested", data])
-  .on({ ArchiveItem })
-  .given([mustHaveItems, mustBeOpen])
-  .emit((data) => ["ItemArchived", data])
-  .on({ SubmitCart })
-  .given([mustHaveItems, mustBeOpen])
-  .emit((_, { state }) => [
+  .emit((data) => [
     "CartSubmitted",
     {
-      orderedProducts: state.items,
-      totalPrice: state.items.reduce(
+      orderedProducts: data.items,
+      totalPrice: data.items.reduce(
         (sum, item) => sum + parseFloat(item.price || "0"),
         0
       ),

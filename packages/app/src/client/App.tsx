@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { httpLink } from "@trpc/client";
 import { httpSubscriptionLink } from "@trpc/client";
@@ -14,6 +14,7 @@ const PRODUCTS = [
     description: "Professional 15-bar pressure",
     gradient: "linear-gradient(135deg, #2c1810 0%, #5c3a28 50%, #8b6914 100%)",
     icon: "☕",
+    image: "https://images.unsplash.com/photo-1548270311-3a9e56a480ff?w=400&h=400&fit=crop&q=80",
   },
   {
     productId: "prod-grinder",
@@ -22,6 +23,7 @@ const PRODUCTS = [
     description: "40mm conical burrs, 18 settings",
     gradient: "linear-gradient(135deg, #1a1a2e 0%, #3d3d5c 50%, #6b5b95 100%)",
     icon: "⚙️",
+    image: "https://images.unsplash.com/photo-1573066380308-24ff4c273dbc?w=400&h=400&fit=crop&q=80",
   },
   {
     productId: "prod-kettle",
@@ -30,6 +32,7 @@ const PRODUCTS = [
     description: "Temperature control, 1.2L capacity",
     gradient: "linear-gradient(135deg, #0c2340 0%, #1b4d6e 50%, #48a9a6 100%)",
     icon: "🫖",
+    image: "https://images.unsplash.com/photo-1621814688815-bae1c0dbc3d2?w=400&h=400&fit=crop&q=80",
   },
   {
     productId: "prod-scale",
@@ -38,6 +41,7 @@ const PRODUCTS = [
     description: "0.1g accuracy, built-in timer",
     gradient: "linear-gradient(135deg, #2d2d2d 0%, #4a4a4a 50%, #7c7c7c 100%)",
     icon: "⚖️",
+    image: "https://images.unsplash.com/photo-1559761340-04607d9f5bff?w=400&h=400&fit=crop&q=80",
   },
   {
     productId: "prod-filters",
@@ -46,6 +50,7 @@ const PRODUCTS = [
     description: "100 pack — unbleached, V60 & Chemex",
     gradient: "linear-gradient(135deg, #8b7355 0%, #c4a77d 50%, #e8d5b7 100%)",
     icon: "🫧",
+    image: "https://images.unsplash.com/photo-1498603536246-15572faa67a6?w=400&h=400&fit=crop&q=80",
   },
 ];
 
@@ -68,15 +73,13 @@ type EventEntry = {
 
 // ── Event colors ─────────────────────────────────────────────────────
 const EVENT_COLORS: Record<string, { bg: string; fg: string; label: string }> = {
-  ItemAdded:            { bg: "#e3f2fd", fg: "#1565c0", label: "ItemAdded" },
-  ItemRemoved:          { bg: "#fce4ec", fg: "#c62828", label: "ItemRemoved" },
-  CartCleared:          { bg: "#fff3e0", fg: "#e65100", label: "CartCleared" },
   CartSubmitted:        { bg: "#e8f5e9", fg: "#2e7d32", label: "CartSubmitted" },
   CartPublished:        { bg: "#f3e5f5", fg: "#6a1b9a", label: "CartPublished" },
-  ItemArchiveRequested: { bg: "#fff8e1", fg: "#f9a825", label: "ItemArchiveRequested" },
-  ItemArchived:         { bg: "#efebe9", fg: "#4e342e", label: "ItemArchived" },
   PriceChanged:         { bg: "#e0f7fa", fg: "#00838f", label: "PriceChanged" },
-  InventoryUpdated:     { bg: "#f1f8e9", fg: "#558b2f", label: "InventoryUpdated" },
+  InventoryImported:    { bg: "#f1f8e9", fg: "#558b2f", label: "InventoryImported" },
+  InventoryAdjusted:    { bg: "#dcedc8", fg: "#33691e", label: "InventoryAdjusted" },
+  InventoryDecommissioned: { bg: "#ffcdd2", fg: "#b71c1c", label: "InventoryDecommissioned" },
+  CartActivityTracked:  { bg: "#e3f2fd", fg: "#1565c0", label: "CartActivityTracked" },
 };
 
 const DEFAULT_EVENT_COLOR = { bg: "#f5f5f5", fg: "#616161", label: "EVENT" };
@@ -277,6 +280,12 @@ body {
   position: relative;
   overflow: hidden;
 }
+.product-img img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
 .product-img::after {
   content: '';
   position: absolute;
@@ -383,6 +392,12 @@ body {
   justify-content: center;
   font-size: 32px;
   flex-shrink: 0;
+  overflow: hidden;
+}
+.cart-item-img img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 .cart-item-info { flex: 1; min-width: 0; }
 .cart-item-name { font-weight: 600; font-size: 14px; color: var(--text-link); margin-bottom: 2px; }
@@ -398,6 +413,47 @@ body {
   font-family: var(--sans);
 }
 .cart-item-remove:hover { color: var(--danger); text-decoration: underline; }
+
+.cart-qty {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  margin-bottom: 6px;
+}
+.cart-qty-btn {
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--border);
+  background: #f7f7f7;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--sans);
+  color: var(--text-primary);
+  transition: background 0.1s;
+}
+.cart-qty-btn:first-child { border-radius: 4px 0 0 4px; }
+.cart-qty-btn:last-child { border-radius: 0 4px 4px 0; }
+.cart-qty-btn:hover { background: #eee; }
+.cart-qty-btn:disabled { opacity: 0.3; cursor: default; }
+.cart-qty-val {
+  width: 36px;
+  height: 28px;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  border-left: none;
+  border-right: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--mono);
+  font-size: 14px;
+  font-weight: 600;
+  background: #fff;
+}
 
 .drawer-footer {
   border-top: 1px solid var(--border);
@@ -817,6 +873,238 @@ body {
 .admin-update-btn:disabled { opacity: 0.5; cursor: default; }
 .admin-product-name { font-weight: 600; color: var(--text-primary); }
 .admin-current { font-family: var(--mono); color: var(--text-secondary); }
+
+/* ── Marketing View ──────────────────────────────────────────────── */
+.mkt-section {
+  max-width: 960px;
+  margin: 32px auto;
+  padding: 0 24px;
+}
+.mkt-section h2 {
+  font-family: var(--serif);
+  font-size: 24px;
+  margin-bottom: 4px;
+}
+.mkt-subtitle {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin-bottom: 24px;
+}
+
+.mkt-kpis {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 16px;
+  margin-bottom: 28px;
+}
+.mkt-kpi {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.mkt-kpi-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--text-secondary);
+}
+.mkt-kpi-value {
+  font-family: var(--mono);
+  font-size: 28px;
+  font-weight: 700;
+  line-height: 1.1;
+  color: var(--text-primary);
+}
+.mkt-kpi-detail {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-top: 2px;
+}
+
+.mkt-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+  margin-bottom: 28px;
+}
+.mkt-card {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.mkt-card-full { grid-column: 1 / -1; }
+.mkt-card-header {
+  padding: 16px 20px 12px;
+  border-bottom: 1px solid #f0f0f0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.mkt-card-header h3 {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+.mkt-card-header .mkt-badge {
+  font-size: 11px;
+  font-family: var(--mono);
+  background: #f0f0f0;
+  color: var(--text-secondary);
+  padding: 2px 8px;
+  border-radius: 10px;
+}
+.mkt-card-body { padding: 0; }
+
+.mkt-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+.mkt-table th {
+  text-align: left;
+  padding: 10px 20px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: var(--text-secondary);
+  background: #fafafa;
+  border-bottom: 1px solid #f0f0f0;
+}
+.mkt-table th:last-child { text-align: right; }
+.mkt-table td {
+  padding: 10px 20px;
+  font-size: 13px;
+  border-bottom: 1px solid #f8f8f8;
+  vertical-align: middle;
+}
+.mkt-table td:last-child { text-align: right; }
+.mkt-table tr:last-child td { border-bottom: none; }
+.mkt-table .mkt-product-cell {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+}
+.mkt-table .mkt-mono {
+  font-family: var(--mono);
+  font-size: 13px;
+}
+
+.mkt-bar-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.mkt-bar-track {
+  flex: 1;
+  height: 8px;
+  background: #f0f0f0;
+  border-radius: 4px;
+  overflow: hidden;
+}
+.mkt-bar-fill {
+  height: 100%;
+  border-radius: 4px;
+  transition: width 0.4s ease;
+}
+.mkt-bar-label {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--text-secondary);
+  min-width: 36px;
+  text-align: right;
+}
+
+.mkt-funnel {
+  padding: 24px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+.mkt-funnel-step {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 14px 0;
+  position: relative;
+}
+.mkt-funnel-step:not(:last-child) {
+  border-bottom: 1px dashed #e8e8e8;
+}
+.mkt-funnel-num {
+  font-family: var(--mono);
+  font-size: 22px;
+  font-weight: 700;
+  min-width: 56px;
+  color: var(--text-primary);
+}
+.mkt-funnel-info { flex: 1; }
+.mkt-funnel-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 2px;
+}
+.mkt-funnel-desc {
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+.mkt-funnel-pct {
+  font-family: var(--mono);
+  font-size: 13px;
+  font-weight: 600;
+  padding: 3px 10px;
+  border-radius: 12px;
+  white-space: nowrap;
+}
+
+.mkt-timeline {
+  padding: 16px 20px;
+  max-height: 340px;
+  overflow-y: auto;
+}
+.mkt-timeline::-webkit-scrollbar { width: 5px; }
+.mkt-timeline::-webkit-scrollbar-track { background: transparent; }
+.mkt-timeline::-webkit-scrollbar-thumb { background: #e0e0e0; border-radius: 3px; }
+.mkt-tl-entry {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 8px 0;
+  border-bottom: 1px solid #f8f8f8;
+  font-size: 13px;
+}
+.mkt-tl-entry:last-child { border-bottom: none; }
+.mkt-tl-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-top: 5px;
+  flex-shrink: 0;
+}
+.mkt-tl-dot.add { background: var(--success); }
+.mkt-tl-dot.remove { background: var(--danger); }
+.mkt-tl-dot.clear { background: var(--text-secondary); }
+.mkt-tl-content { flex: 1; min-width: 0; }
+.mkt-tl-action { font-weight: 600; }
+.mkt-tl-meta {
+  font-size: 11px;
+  color: var(--text-secondary);
+  font-family: var(--mono);
+  margin-top: 1px;
+}
+.mkt-empty {
+  padding: 48px 24px;
+  text-align: center;
+  color: var(--text-secondary);
+}
+.mkt-empty .empty-icon { font-size: 48px; margin-bottom: 12px; }
 `;
 
 // ── JSON syntax highlighting ─────────────────────────────────────────
@@ -875,7 +1163,7 @@ function ProductCard({
   return (
     <div className="product-card">
       <div className="product-img" style={{ background: product.gradient }}>
-        {product.icon}
+        <img src={product.image} alt={product.name} loading="lazy" />
       </div>
       <div className="product-body">
         <div className="product-name">{product.name}</div>
@@ -992,39 +1280,31 @@ function EventPanel({
   );
 }
 
-// ── Cart Drawer ──────────────────────────────────────────────────────
+// ── Cart Drawer (reads from local cart state, only PlaceOrder talks to server)
 function CartDrawer({
-  open, onClose, cartId, onNewCart,
+  open, onClose, cart, onIncrement, onDecrement, onClear, onSubmit, submitting, liveStock,
 }: {
   open: boolean;
   onClose: () => void;
-  cartId: string;
-  onNewCart: () => void;
+  cart: Record<string, number>;
+  onIncrement: (productId: string) => void;
+  onDecrement: (productId: string) => void;
+  onClear: () => void;
+  onSubmit: () => void;
+  submitting: boolean;
+  liveStock: Record<string, number>;
 }) {
-  const utils = trpc.useUtils();
-  const cart = trpc.getCart.useQuery(cartId, { enabled: !!cartId });
-
-  const invalidateCart = () => utils.getCart.invalidate(cartId);
-
-  const removeItem = trpc.RemoveItem.useMutation({ onSuccess: invalidateCart });
-  const clearCart = trpc.ClearCart.useMutation({ onSuccess: invalidateCart });
-  const submitCart = trpc.SubmitCart.useMutation({
-    onSuccess: () => {
-      invalidateCart();
-      onNewCart();
-      onClose();
-    },
-  });
-
   if (!open) return null;
 
-  const items = cart.data?.items ?? [];
-  const status = cart.data?.status ?? "Open";
-  const subtotal = items
-    .reduce((sum, i) => sum + parseFloat(i.price || "0"), 0)
-    .toFixed(2);
-
   const productMap = Object.fromEntries(PRODUCTS.map((p) => [p.productId, p]));
+  const entries = Object.entries(cart).filter(([, qty]) => qty > 0);
+  const totalItems = entries.reduce((sum, [, qty]) => sum + qty, 0);
+  const subtotal = entries
+    .reduce((sum, [pid, qty]) => {
+      const prod = productMap[pid];
+      return sum + qty * parseFloat(prod?.price ?? "0");
+    }, 0)
+    .toFixed(2);
 
   return (
     <>
@@ -1035,46 +1315,44 @@ function CartDrawer({
           <button className="drawer-close" onClick={onClose}>✕</button>
         </div>
 
-        {status !== "Open" && (
-          <div className={`cart-status-bar ${status === "Submitted" ? "submitted" : "published"}`}>
-            {status === "Submitted"
-              ? "📦 Order submitted — processing..."
-              : "✅ Order published successfully!"}
-          </div>
-        )}
-
         <div className="drawer-body">
-          {!cartId || items.length === 0 ? (
+          {entries.length === 0 ? (
             <div className="drawer-empty">
               <div className="empty-icon">🛒</div>
               <p>Your cart is empty</p>
             </div>
           ) : (
-            items.map((item) => {
-              const prod = productMap[item.productId];
+            entries.map(([productId, qty]) => {
+              const prod = productMap[productId];
+              if (!prod) return null;
+              const lineTotal = (qty * parseFloat(prod.price)).toFixed(2);
               return (
-                <div key={item.itemId} className="cart-item">
-                  <div className="cart-item-img" style={{ background: prod?.gradient ?? "#eee" }}>
-                    {prod?.icon ?? "📦"}
+                <div key={productId} className="cart-item">
+                  <div className="cart-item-img" style={{ background: prod.gradient }}>
+                    {prod.image
+                      ? <img src={prod.image} alt={prod.name} loading="lazy" />
+                      : prod.icon}
                   </div>
                   <div className="cart-item-info">
-                    <div className="cart-item-name">{item.name}</div>
-                    <div className="cart-item-desc">{prod?.description ?? ""}</div>
-                    <div className="cart-item-price">${item.price}</div>
-                    {status === "Open" && (
+                    <div className="cart-item-name">{prod.name}</div>
+                    <div className="cart-item-desc">{prod.description}</div>
+                    <div className="cart-item-price">${lineTotal}</div>
+                    <div className="cart-qty">
                       <button
-                        className="cart-item-remove"
-                        onClick={() =>
-                          removeItem.mutate({
-                            stream: cartId,
-                            itemId: item.itemId,
-                            productId: item.productId,
-                          })
-                        }
+                        className="cart-qty-btn"
+                        onClick={() => onDecrement(productId)}
                       >
-                        Delete
+                        {qty === 1 ? "🗑" : "−"}
                       </button>
-                    )}
+                      <div className="cart-qty-val">{qty}</div>
+                      <button
+                        className="cart-qty-btn"
+                        disabled={qty >= (liveStock[productId] ?? 0)}
+                        onClick={() => onIncrement(productId)}
+                      >
+                        +
+                      </button>
+                    </div>
                   </div>
                 </div>
               );
@@ -1082,30 +1360,22 @@ function CartDrawer({
           )}
         </div>
 
-        {items.length > 0 && (
+        {entries.length > 0 && (
           <div className="drawer-footer">
             <div className="drawer-subtotal">
-              <span>Subtotal ({items.length} item{items.length > 1 ? "s" : ""}):</span>
+              <span>Subtotal ({totalItems} item{totalItems > 1 ? "s" : ""}):</span>
               <strong>${subtotal}</strong>
             </div>
-            {status === "Open" ? (
-              <>
-                <button
-                  className="checkout-btn"
-                  onClick={() => submitCart.mutate({ stream: cartId })}
-                  disabled={submitCart.isPending}
-                >
-                  {submitCart.isPending ? "Submitting..." : "Proceed to Checkout"}
-                </button>
-                <button className="clear-btn" onClick={() => clearCart.mutate({ stream: cartId })}>
-                  Clear cart
-                </button>
-              </>
-            ) : (
-              <button className="new-cart-btn" onClick={() => { onNewCart(); onClose(); }}>
-                Start New Cart
-              </button>
-            )}
+            <button
+              className="checkout-btn"
+              onClick={onSubmit}
+              disabled={submitting}
+            >
+              {submitting ? "Placing order..." : "Place Order"}
+            </button>
+            <button className="clear-btn" onClick={onClear}>
+              Clear cart
+            </button>
           </div>
         )}
       </div>
@@ -1184,15 +1454,15 @@ function OrdersView() {
 function AdminView() {
   const utils = trpc.useUtils();
   const products = trpc.getProducts.useQuery();
-  const changePrice = trpc.ChangePrice.useMutation({
+  const adjustInventory = trpc.AdjustInventory.useMutation({
     onSuccess: () => utils.getProducts.invalidate(),
   });
-  const importInventory = trpc.ImportInventory.useMutation({
+  const decommission = trpc.DecommissionInventory.useMutation({
     onSuccess: () => utils.getProducts.invalidate(),
   });
 
   const [priceInputs, setPriceInputs] = useState<Record<string, string>>({});
-  const [invInputs, setInvInputs] = useState<Record<string, string>>({});
+  const [qtyInputs, setQtyInputs] = useState<Record<string, string>>({});
 
   const data = products.data ?? [];
   const productMap = Object.fromEntries(PRODUCTS.map((p) => [p.productId, p]));
@@ -1202,68 +1472,15 @@ function AdminView() {
       <h2>Admin</h2>
 
       <div className="admin-block">
-        <h3>Price Editor</h3>
-        <div className="admin-table-wrap">
-          <table className="admin-table">
-            <thead>
-              <tr>
-                <th>Product</th>
-                <th>Current Price</th>
-                <th>New Price</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              {data.map((p) => {
-                const meta = productMap[p.productId];
-                return (
-                  <tr key={p.productId}>
-                    <td className="admin-product-name">{meta?.icon} {meta?.name ?? p.productId}</td>
-                    <td className="admin-current">${p.price.toFixed(2)}</td>
-                    <td>
-                      <input
-                        className="admin-input"
-                        type="number"
-                        step="0.01"
-                        min="0"
-                        placeholder={p.price.toFixed(2)}
-                        value={priceInputs[p.productId] ?? ""}
-                        onChange={(e) =>
-                          setPriceInputs((prev) => ({ ...prev, [p.productId]: e.target.value }))
-                        }
-                      />
-                    </td>
-                    <td>
-                      <button
-                        className="admin-update-btn"
-                        disabled={!priceInputs[p.productId] || changePrice.isPending}
-                        onClick={() => {
-                          const val = parseFloat(priceInputs[p.productId]);
-                          if (!isNaN(val) && val >= 0) {
-                            changePrice.mutate({ productId: p.productId, price: val });
-                            setPriceInputs((prev) => ({ ...prev, [p.productId]: "" }));
-                          }
-                        }}
-                      >
-                        Update
-                      </button>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      <div className="admin-block">
         <h3>Inventory Manager</h3>
         <div className="admin-table-wrap">
           <table className="admin-table">
             <thead>
               <tr>
                 <th>Product</th>
-                <th>Current Stock</th>
+                <th>Price</th>
+                <th>Stock</th>
+                <th>New Price</th>
                 <th>New Stock</th>
                 <th></th>
               </tr>
@@ -1271,10 +1488,28 @@ function AdminView() {
             <tbody>
               {data.map((p) => {
                 const meta = productMap[p.productId];
+                const isActive = p.inventory > 0;
+                const newPrice = priceInputs[p.productId] ?? "";
+                const newQty = qtyInputs[p.productId] ?? "";
+                const hasChanges = newPrice !== "" || newQty !== "";
                 return (
-                  <tr key={p.productId}>
+                  <tr key={p.productId} style={isActive ? {} : { opacity: 0.5 }}>
                     <td className="admin-product-name">{meta?.icon} {meta?.name ?? p.productId}</td>
+                    <td className="admin-current">${p.price.toFixed(2)}</td>
                     <td className="admin-current">{p.inventory}</td>
+                    <td>
+                      <input
+                        className="admin-input"
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        placeholder={p.price.toFixed(2)}
+                        value={newPrice}
+                        onChange={(e) =>
+                          setPriceInputs((prev) => ({ ...prev, [p.productId]: e.target.value }))
+                        }
+                      />
+                    </td>
                     <td>
                       <input
                         className="admin-input"
@@ -1282,26 +1517,42 @@ function AdminView() {
                         step="1"
                         min="0"
                         placeholder={String(p.inventory)}
-                        value={invInputs[p.productId] ?? ""}
+                        value={newQty}
                         onChange={(e) =>
-                          setInvInputs((prev) => ({ ...prev, [p.productId]: e.target.value }))
+                          setQtyInputs((prev) => ({ ...prev, [p.productId]: e.target.value }))
                         }
                       />
                     </td>
-                    <td>
+                    <td style={{ display: "flex", gap: "8px" }}>
                       <button
                         className="admin-update-btn"
-                        disabled={!invInputs[p.productId] || importInventory.isPending}
+                        disabled={!hasChanges || adjustInventory.isPending}
                         onClick={() => {
-                          const val = parseInt(invInputs[p.productId], 10);
-                          if (!isNaN(val) && val >= 0) {
-                            importInventory.mutate({ productId: p.productId, inventory: val });
-                            setInvInputs((prev) => ({ ...prev, [p.productId]: "" }));
+                          const price = newPrice !== "" ? parseFloat(newPrice) : p.price;
+                          const qty = newQty !== "" ? parseInt(newQty, 10) : p.inventory;
+                          if (!isNaN(price) && price >= 0 && !isNaN(qty) && qty >= 0) {
+                            adjustInventory.mutate({
+                              productId: p.productId,
+                              price,
+                              quantity: qty,
+                            });
+                            setPriceInputs((prev) => ({ ...prev, [p.productId]: "" }));
+                            setQtyInputs((prev) => ({ ...prev, [p.productId]: "" }));
                           }
                         }}
                       >
                         Update
                       </button>
+                      {isActive && (
+                        <button
+                          className="admin-update-btn"
+                          style={{ background: "#fff", borderColor: "var(--danger)", color: "var(--danger)" }}
+                          disabled={decommission.isPending}
+                          onClick={() => decommission.mutate({ productId: p.productId })}
+                        >
+                          Decommission
+                        </button>
+                      )}
                     </td>
                   </tr>
                 );
@@ -1314,6 +1565,284 @@ function AdminView() {
   );
 }
 
+// ── Marketing View ───────────────────────────────────────────────────
+type ActivityEntry = {
+  sessionId: string;
+  action: "add" | "remove" | "clear";
+  productId: string;
+  quantity: number;
+  timestamp: string;
+};
+
+function MarketingView() {
+  const activityQuery = trpc.getCartActivity.useQuery(undefined, { refetchInterval: 5000 });
+  const ordersQuery = trpc.listOrders.useQuery();
+
+  const activities: ActivityEntry[] = activityQuery.data ?? [];
+  const orders = ordersQuery.data ?? [];
+  const productMap = Object.fromEntries(PRODUCTS.map((p) => [p.productId, p]));
+
+  const stats = useMemo(() => {
+    const sessions = new Set<string>();
+    const perProduct: Record<string, { adds: number; removes: number; clears: number }> = {};
+
+    for (const a of activities) {
+      sessions.add(a.sessionId);
+      if (!perProduct[a.productId]) {
+        perProduct[a.productId] = { adds: 0, removes: 0, clears: 0 };
+      }
+      if (a.action === "add") perProduct[a.productId].adds += a.quantity;
+      else if (a.action === "remove") perProduct[a.productId].removes += a.quantity;
+      else perProduct[a.productId].clears++;
+    }
+
+    const totalAdds = activities.filter((a) => a.action === "add").reduce((s, a) => s + a.quantity, 0);
+    const totalRemoves = activities.filter((a) => a.action === "remove").reduce((s, a) => s + a.quantity, 0);
+    const sessionsWithAdds = new Set(activities.filter((a) => a.action === "add").map((a) => a.sessionId)).size;
+    const orderCount = orders.length;
+
+    // Product engagement sorted by total adds desc
+    const productEngagement = Object.entries(perProduct)
+      .map(([productId, counts]) => ({
+        productId,
+        ...counts,
+        net: counts.adds - counts.removes,
+      }))
+      .sort((a, b) => b.adds - a.adds);
+
+    const maxAdds = Math.max(1, ...productEngagement.map((p) => p.adds));
+
+    return {
+      sessionCount: sessions.size,
+      totalEvents: activities.length,
+      totalAdds,
+      totalRemoves,
+      sessionsWithAdds,
+      orderCount,
+      conversionRate: sessionsWithAdds > 0 ? orderCount / sessionsWithAdds : 0,
+      productEngagement,
+      maxAdds,
+    };
+  }, [activities, orders]);
+
+  // Recent activities (newest first, capped at 50)
+  const recentActivities = useMemo(
+    () => [...activities].reverse().slice(0, 50),
+    [activities]
+  );
+
+  if (activityQuery.isLoading) {
+    return (
+      <section className="mkt-section">
+        <h2>Marketing</h2>
+        <div className="mkt-empty"><p>Loading activity data...</p></div>
+      </section>
+    );
+  }
+
+  return (
+    <section className="mkt-section">
+      <h2>Marketing</h2>
+      <p className="mkt-subtitle">Cart activity analytics from the CartTracking event stream</p>
+
+      {activities.length === 0 ? (
+        <div className="mkt-empty">
+          <div className="empty-icon">📊</div>
+          <p>No browsing activity yet. Add items to the cart to generate tracking events.</p>
+        </div>
+      ) : (
+        <>
+          {/* KPI row */}
+          <div className="mkt-kpis">
+            <div className="mkt-kpi">
+              <span className="mkt-kpi-label">Sessions</span>
+              <span className="mkt-kpi-value">{stats.sessionCount}</span>
+              <span className="mkt-kpi-detail">unique browsers</span>
+            </div>
+            <div className="mkt-kpi">
+              <span className="mkt-kpi-label">Total Events</span>
+              <span className="mkt-kpi-value">{stats.totalEvents}</span>
+              <span className="mkt-kpi-detail">
+                {stats.totalAdds} adds / {stats.totalRemoves} removes
+              </span>
+            </div>
+            <div className="mkt-kpi">
+              <span className="mkt-kpi-label">Orders Placed</span>
+              <span className="mkt-kpi-value">{stats.orderCount}</span>
+              <span className="mkt-kpi-detail">
+                {stats.sessionsWithAdds > 0
+                  ? `from ${stats.sessionsWithAdds} session${stats.sessionsWithAdds > 1 ? "s" : ""} with adds`
+                  : "no sessions with adds yet"}
+              </span>
+            </div>
+            <div className="mkt-kpi">
+              <span className="mkt-kpi-label">Conversion Rate</span>
+              <span className="mkt-kpi-value">
+                {(stats.conversionRate * 100).toFixed(1)}%
+              </span>
+              <span className="mkt-kpi-detail">orders / sessions with adds</span>
+            </div>
+          </div>
+
+          <div className="mkt-grid">
+            {/* Product Engagement */}
+            <div className="mkt-card">
+              <div className="mkt-card-header">
+                <h3>Product Interest</h3>
+                <span className="mkt-badge">{stats.productEngagement.length} products</span>
+              </div>
+              <div className="mkt-card-body">
+                <table className="mkt-table">
+                  <thead>
+                    <tr>
+                      <th>Product</th>
+                      <th>Adds</th>
+                      <th>Removes</th>
+                      <th style={{ textAlign: "left" }}>Engagement</th>
+                      <th>Net</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {stats.productEngagement.map((p) => {
+                      const meta = productMap[p.productId];
+                      const pct = Math.round((p.adds / stats.maxAdds) * 100);
+                      return (
+                        <tr key={p.productId}>
+                          <td>
+                            <span className="mkt-product-cell">
+                              {meta?.icon ?? "📦"} {meta?.name ?? p.productId}
+                            </span>
+                          </td>
+                          <td className="mkt-mono" style={{ color: "var(--success)" }}>+{p.adds}</td>
+                          <td className="mkt-mono" style={{ color: "var(--danger)" }}>-{p.removes}</td>
+                          <td>
+                            <div className="mkt-bar-wrap">
+                              <div className="mkt-bar-track">
+                                <div
+                                  className="mkt-bar-fill"
+                                  style={{
+                                    width: `${pct}%`,
+                                    background: `linear-gradient(90deg, var(--success), #48a9a6)`,
+                                  }}
+                                />
+                              </div>
+                              <span className="mkt-bar-label">{pct}%</span>
+                            </div>
+                          </td>
+                          <td className="mkt-mono" style={{
+                            fontWeight: 700,
+                            color: p.net > 0 ? "var(--success)" : p.net < 0 ? "var(--danger)" : "var(--text-secondary)",
+                          }}>
+                            {p.net > 0 ? "+" : ""}{p.net}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* Conversion Funnel */}
+            <div className="mkt-card">
+              <div className="mkt-card-header">
+                <h3>Conversion Funnel</h3>
+              </div>
+              <div className="mkt-funnel">
+                <div className="mkt-funnel-step">
+                  <span className="mkt-funnel-num">{stats.sessionCount}</span>
+                  <div className="mkt-funnel-info">
+                    <div className="mkt-funnel-label">Browsing Sessions</div>
+                    <div className="mkt-funnel-desc">Sessions with any cart activity</div>
+                  </div>
+                  <span className="mkt-funnel-pct" style={{ background: "#e3f2fd", color: "#1565c0" }}>
+                    100%
+                  </span>
+                </div>
+                <div className="mkt-funnel-step">
+                  <span className="mkt-funnel-num">{stats.sessionsWithAdds}</span>
+                  <div className="mkt-funnel-info">
+                    <div className="mkt-funnel-label">Added to Cart</div>
+                    <div className="mkt-funnel-desc">Sessions where items were added</div>
+                  </div>
+                  <span className="mkt-funnel-pct" style={{ background: "#e8f5e9", color: "#2e7d32" }}>
+                    {stats.sessionCount > 0
+                      ? `${Math.round((stats.sessionsWithAdds / stats.sessionCount) * 100)}%`
+                      : "—"}
+                  </span>
+                </div>
+                <div className="mkt-funnel-step">
+                  <span className="mkt-funnel-num">{stats.orderCount}</span>
+                  <div className="mkt-funnel-info">
+                    <div className="mkt-funnel-label">Order Placed</div>
+                    <div className="mkt-funnel-desc">Completed checkout</div>
+                  </div>
+                  <span className="mkt-funnel-pct" style={{
+                    background: stats.conversionRate > 0 ? "#f3e5f5" : "#fff8e1",
+                    color: stats.conversionRate > 0 ? "#6a1b9a" : "#b8860b",
+                  }}>
+                    {stats.sessionsWithAdds > 0
+                      ? `${(stats.conversionRate * 100).toFixed(1)}%`
+                      : "—"}
+                  </span>
+                </div>
+                {stats.sessionsWithAdds > stats.orderCount && (
+                  <div className="mkt-funnel-step">
+                    <span className="mkt-funnel-num" style={{ color: "var(--danger)" }}>
+                      {stats.sessionsWithAdds - stats.orderCount}
+                    </span>
+                    <div className="mkt-funnel-info">
+                      <div className="mkt-funnel-label">Abandoned Carts</div>
+                      <div className="mkt-funnel-desc">Sessions with adds but no order</div>
+                    </div>
+                    <span className="mkt-funnel-pct" style={{ background: "#ffebee", color: "#b71c1c" }}>
+                      {Math.round(((stats.sessionsWithAdds - stats.orderCount) / stats.sessionsWithAdds) * 100)}%
+                    </span>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Activity Timeline */}
+            <div className="mkt-card mkt-card-full">
+              <div className="mkt-card-header">
+                <h3>Recent Activity</h3>
+                <span className="mkt-badge">latest {recentActivities.length}</span>
+              </div>
+              <div className="mkt-timeline">
+                {recentActivities.map((a, i) => {
+                  const meta = productMap[a.productId];
+                  const time = new Date(a.timestamp);
+                  const timeStr = time.toLocaleTimeString("en-US", {
+                    hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit",
+                  });
+                  const shortSession = a.sessionId.length > 12
+                    ? `${a.sessionId.slice(0, 6)}...${a.sessionId.slice(-4)}`
+                    : a.sessionId;
+                  const actionLabel =
+                    a.action === "add" ? `Added ${meta?.name ?? a.productId}`
+                    : a.action === "remove" ? `Removed ${meta?.name ?? a.productId}`
+                    : `Cleared ${meta?.name ?? a.productId}`;
+
+                  return (
+                    <div key={`${a.sessionId}-${a.timestamp}-${i}`} className="mkt-tl-entry">
+                      <span className={`mkt-tl-dot ${a.action}`} />
+                      <div className="mkt-tl-content">
+                        <div className="mkt-tl-action">{actionLabel}</div>
+                        <div className="mkt-tl-meta">{timeStr} &middot; {shortSession}</div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        </>
+      )}
+    </section>
+  );
+}
+
 // ── Toast ────────────────────────────────────────────────────────────
 function Toast({ message }: { message: string | null }) {
   if (!message) return null;
@@ -1321,10 +1850,10 @@ function Toast({ message }: { message: string | null }) {
 }
 
 // ── Main App ─────────────────────────────────────────────────────────
-type Tab = "shop" | "orders" | "admin";
+type Tab = "shop" | "orders" | "admin" | "marketing";
 
 function CartApp() {
-  const [cartId, setCartId] = useState<string>("");
+  const [localCart, setLocalCart] = useState<Record<string, number>>({});
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const [addingProduct, setAddingProduct] = useState<string | null>(null);
@@ -1332,15 +1861,16 @@ function CartApp() {
   const [connected, setConnected] = useState(false);
   const [activeTab, setActiveTab] = useState<Tab>("shop");
   const seenIds = useRef(new Set<number>());
+  const sessionId = useRef(crypto.randomUUID());
 
   const utils = trpc.useUtils();
-  const cart = trpc.getCart.useQuery(cartId, { enabled: !!cartId });
-  const itemCount = cart.data?.items.length ?? 0;
+  const itemCount = Object.values(localCart).reduce((sum, qty) => sum + qty, 0);
 
   // Live product data from domain (prices + inventory)
   const productsQuery = trpc.getProducts.useQuery();
   const liveProducts = productsQuery.data ?? [];
   const liveMap = Object.fromEntries(liveProducts.map((p) => [p.productId, p]));
+  const liveStock = Object.fromEntries(liveProducts.map((p) => [p.productId, p.inventory]));
 
   // SSE subscription — receives every event as it's committed
   const onData = useCallback(
@@ -1350,20 +1880,19 @@ function CartApp() {
       seenIds.current.add(evt.id);
       setEvents((prev) => [...prev, evt]);
 
-      // Invalidate cart if the event is on the current cart stream
-      if (cartId && evt.stream === cartId) {
-        utils.getCart.invalidate(cartId);
-      }
-
-      // Reactive invalidation for other views
-      if (evt.name === "PriceChanged" || evt.name === "InventoryUpdated") {
+      // Reactive invalidation for views
+      if (evt.name === "PriceChanged" || evt.name === "InventoryImported" || evt.name === "InventoryAdjusted" || evt.name === "InventoryDecommissioned") {
         utils.getProducts.invalidate();
       }
       if (evt.name === "CartSubmitted" || evt.name === "CartPublished") {
         utils.listOrders.invalidate();
+        utils.getProducts.invalidate();
+      }
+      if (evt.name === "CartActivityTracked") {
+        utils.getCartActivity.invalidate();
       }
     },
-    [cartId, utils]
+    [utils]
   );
 
   trpc.onEvent.useSubscription(undefined, {
@@ -1372,36 +1901,93 @@ function CartApp() {
     onError: () => setConnected(false),
   });
 
-  const addItem = trpc.AddItem.useMutation({
-    onSuccess: (data) => {
-      setCartId(data.cartId);
-      utils.getCart.invalidate(data.cartId);
+  // Fire-and-forget cart activity tracking
+  const trackActivity = trpc.TrackCartActivity.useMutation();
+  const track = (action: "add" | "remove" | "clear", productId: string, quantity: number) => {
+    trackActivity.mutate({ sessionId: sessionId.current, action, productId, quantity });
+  };
+
+  // Local cart operations (no server calls)
+  const productMap = Object.fromEntries(PRODUCTS.map((p) => [p.productId, p]));
+
+  const handleAdd = (product: (typeof PRODUCTS)[number]) => {
+    setAddingProduct(product.productId);
+    setLocalCart((prev) => ({
+      ...prev,
+      [product.productId]: (prev[product.productId] ?? 0) + 1,
+    }));
+    track("add", product.productId, 1);
+    setToast("Added to cart");
+    setTimeout(() => {
+      setToast(null);
       setAddingProduct(null);
-      setToast("Added to cart");
-      setTimeout(() => setToast(null), 2000);
+    }, 800);
+  };
+
+  const handleIncrement = (productId: string) => {
+    setLocalCart((prev) => ({
+      ...prev,
+      [productId]: (prev[productId] ?? 0) + 1,
+    }));
+    track("add", productId, 1);
+  };
+
+  const handleDecrement = (productId: string) => {
+    setLocalCart((prev) => {
+      const qty = (prev[productId] ?? 0) - 1;
+      if (qty <= 0) {
+        const { [productId]: _, ...rest } = prev;
+        return rest;
+      }
+      return { ...prev, [productId]: qty };
+    });
+    track("remove", productId, 1);
+  };
+
+  const handleClear = () => {
+    const productIds = Object.keys(localCart);
+    setLocalCart({});
+    for (const pid of productIds) {
+      track("clear", pid, 0);
+    }
+  };
+
+  // PlaceOrder — the only mutation that touches the server
+  const placeOrder = trpc.PlaceOrder.useMutation({
+    onSuccess: () => {
+      setLocalCart({});
+      setDrawerOpen(false);
+      utils.getProducts.invalidate();
+      utils.listOrders.invalidate();
+      setToast("Order placed successfully!");
+      setTimeout(() => setToast(null), 3000);
     },
     onError: (err) => {
-      setAddingProduct(null);
-      setToast(
-        err.message.includes("more than 3")
-          ? "Cart is full (max 3 items)"
-          : "Could not add item"
-      );
+      setToast(err.message.includes("invariant")
+        ? "Could not place order — check stock availability"
+        : "Could not place order");
       setTimeout(() => setToast(null), 3000);
     },
   });
 
-  const handleAdd = (product: (typeof PRODUCTS)[number]) => {
-    const live = liveMap[product.productId];
-    const price = live && live.price > 0 ? live.price.toFixed(2) : product.price;
-    setAddingProduct(product.productId);
-    addItem.mutate({
-      stream: cartId || undefined,
-      name: product.name,
-      description: product.description,
-      price,
-      productId: product.productId,
-    });
+  const handleSubmit = () => {
+    const items = Object.entries(localCart)
+      .filter(([, qty]) => qty > 0)
+      .flatMap(([productId, qty]) => {
+        const prod = productMap[productId];
+        if (!prod) return [];
+        const live = liveMap[productId];
+        const price = live && live.price > 0 ? live.price.toFixed(2) : prod.price;
+        return Array.from({ length: qty }, () => ({
+          itemId: crypto.randomUUID(),
+          name: prod.name,
+          description: prod.description,
+          price,
+          productId: prod.productId,
+        }));
+      });
+    if (items.length === 0) return;
+    placeOrder.mutate({ items });
   };
 
   return (
@@ -1445,6 +2031,12 @@ function CartApp() {
             >
               Admin
             </button>
+            <button
+              className={`subnav-tab ${activeTab === "marketing" ? "active" : ""}`}
+              onClick={() => setActiveTab("marketing")}
+            >
+              Marketing
+            </button>
           </nav>
 
           {activeTab === "shop" && (
@@ -1474,6 +2066,7 @@ function CartApp() {
 
           {activeTab === "orders" && <OrdersView />}
           {activeTab === "admin" && <AdminView />}
+          {activeTab === "marketing" && <MarketingView />}
         </div>
 
         <EventPanel events={events} connected={connected} />
@@ -1482,8 +2075,13 @@ function CartApp() {
       <CartDrawer
         open={drawerOpen}
         onClose={() => setDrawerOpen(false)}
-        cartId={cartId}
-        onNewCart={() => setCartId("")}
+        cart={localCart}
+        onIncrement={handleIncrement}
+        onDecrement={handleDecrement}
+        onClear={handleClear}
+        onSubmit={handleSubmit}
+        submitting={placeOrder.isPending}
+        liveStock={liveStock}
       />
 
       <Toast message={toast} />

@@ -1,4 +1,4 @@
-import { Cart, Price, Inventory, getOrders, app } from "@rotorsoft/es-course-domain";
+import { Price, getOrders, getInventoryItems, getCartActivities, app } from "@rotorsoft/es-course-domain";
 import type { Target } from "@rotorsoft/act";
 import { EventEmitter } from "node:events";
 import { initTRPC } from "@trpc/server";
@@ -40,66 +40,43 @@ function serializeEvents(events: Array<{ id: number; name: unknown; data: unknow
   }));
 }
 
-// Auto-drain on every commit (processes reactions and projections)
-app.on("committed", () => {
-  app.correlate({ after: -1, limit: 100 }).then(() => app.drain()).catch(console.error);
-});
+// Drain reactions and projections — two passes:
+// 1. CartSubmitted → ReserveStock + PublishCart (single reaction)
+// 2. Projections (orders, inventory read models)
+async function drainAll() {
+  for (let i = 0; i < 2; i++) {
+    const { leased } = await app.correlate({ after: -1, limit: 100 });
+    if (leased.length === 0) return;
+    await app.drain({ streamLimit: 10, eventLimit: 100 });
+  }
+}
 
-// Local event bus for SSE subscriptions (decoupled from app's own listeners)
+// Local event bus for SSE subscriptions
 const eventBus = new EventEmitter();
 eventBus.setMaxListeners(100);
 app.on("committed", () => eventBus.emit("committed"));
 
 export const router = t.router({
-  // Cart commands
-  AddItem: t.procedure
+  // Place a complete order in one call
+  PlaceOrder: t.procedure
     .input(
       z.object({
-        stream: z.string().optional(),
-        description: z.string(),
-        price: z.string(),
-        itemId: z.string().optional(),
-        name: z.string(),
-        productId: z.string(),
+        items: z.array(
+          z.object({
+            itemId: z.string(),
+            name: z.string(),
+            description: z.string(),
+            price: z.string(),
+            productId: z.string(),
+          })
+        ),
       })
     )
     .mutation(async ({ input }) => {
-      const { stream, ...data } = input;
-      const target = userTarget(stream);
-      const itemId = data.itemId ?? crypto.randomUUID();
-      await app.do("AddItem", target, { ...data, itemId });
-      return { success: true, cartId: target.stream, itemId };
-    }),
-
-  RemoveItem: t.procedure
-    .input(
-      z.object({
-        stream: z.string(),
-        itemId: z.string(),
-        productId: z.string(),
-      })
-    )
-    .mutation(async ({ input }) => {
-      const { stream, ...data } = input;
-      await app.do("RemoveItem", userTarget(stream), data);
-      return { success: true };
-    }),
-
-  ClearCart: t.procedure
-    .input(z.object({ stream: z.string() }))
-    .mutation(async ({ input }) => {
-      await app.do("ClearCart", userTarget(input.stream), {});
-      return { success: true };
-    }),
-
-  SubmitCart: t.procedure
-    .input(z.object({ stream: z.string() }))
-    .mutation(async ({ input }) => {
-      await app.do("SubmitCart", userTarget(input.stream), {});
-      // Process reactions synchronously so CartPublished is committed before response
-      await app.correlate({ after: -1, limit: 100 });
-      await app.drain();
-      return { success: true };
+      const target = userTarget();
+      await app.do("PlaceOrder", target, { items: input.items });
+      await drainAll();
+      return { success: true, orderId: target.stream };
     }),
 
   // Price commands
@@ -116,6 +93,7 @@ export const router = t.router({
         { stream: input.productId, actor: { id: "system", name: "System" } },
         input
       );
+      await drainAll();
       return { success: true };
     }),
 
@@ -124,7 +102,9 @@ export const router = t.router({
     .input(
       z.object({
         productId: z.string(),
-        inventory: z.number(),
+        name: z.string(),
+        price: z.number(),
+        quantity: z.number(),
       })
     )
     .mutation(async ({ input }) => {
@@ -133,13 +113,66 @@ export const router = t.router({
         { stream: input.productId, actor: { id: "system", name: "System" } },
         input
       );
+      await drainAll();
+      return { success: true };
+    }),
+
+  AdjustInventory: t.procedure
+    .input(
+      z.object({
+        productId: z.string(),
+        quantity: z.number(),
+        price: z.number(),
+      })
+    )
+    .mutation(async ({ input }) => {
+      await app.do(
+        "AdjustInventory",
+        { stream: input.productId, actor: { id: "system", name: "System" } },
+        input
+      );
+      await drainAll();
+      return { success: true };
+    }),
+
+  DecommissionInventory: t.procedure
+    .input(
+      z.object({
+        productId: z.string(),
+      })
+    )
+    .mutation(async ({ input }) => {
+      await app.do(
+        "DecommissionInventory",
+        { stream: input.productId, actor: { id: "system", name: "System" } },
+        input
+      );
+      await drainAll();
+      return { success: true };
+    }),
+
+  // Cart activity tracking (fire-and-forget, no drain)
+  TrackCartActivity: t.procedure
+    .input(
+      z.object({
+        sessionId: z.string(),
+        action: z.enum(["add", "remove", "clear"]),
+        productId: z.string(),
+        quantity: z.number(),
+      })
+    )
+    .mutation(async ({ input }) => {
+      await app.do(
+        "TrackCartActivity",
+        { stream: input.sessionId, actor: { id: "anonymous", name: "Browser" } },
+        { action: input.action, productId: input.productId, quantity: input.quantity }
+      );
       return { success: true };
     }),
 
   // Queries
-  getCart: t.procedure.input(z.string()).query(async ({ input }) => {
-    const snap = await app.load(Cart, input);
-    return snap.state;
+  getCartActivity: t.procedure.query(async () => {
+    return getCartActivities();
   }),
 
   getPrice: t.procedure.input(z.string()).query(async ({ input }) => {
@@ -147,26 +180,21 @@ export const router = t.router({
     return snap.state;
   }),
 
-  getInventory: t.procedure.input(z.string()).query(async ({ input }) => {
-    const snap = await app.load(Inventory, input);
-    return snap.state;
+  getInventory: t.procedure.query(async () => {
+    return getInventoryItems();
   }),
 
   getProducts: t.procedure.query(async () => {
+    const items = getInventoryItems();
     const ids = ["prod-espresso", "prod-grinder", "prod-kettle", "prod-scale", "prod-filters"];
-    return Promise.all(
-      ids.map(async (id) => {
-        const [priceSnap, invSnap] = await Promise.all([
-          app.load(Price, id),
-          app.load(Inventory, id),
-        ]);
-        return {
-          productId: id,
-          price: priceSnap.state.price,
-          inventory: invSnap.state.inventory,
-        };
-      })
-    );
+    return ids.map((id) => {
+      const inv = items[id];
+      return {
+        productId: id,
+        price: inv?.price ?? 0,
+        inventory: inv?.quantity ?? 0,
+      };
+    });
   }),
 
   listOrders: t.procedure.query(async () => {
