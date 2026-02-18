@@ -24,6 +24,7 @@ export const Inventory = state({ Inventory: InventoryState })
     }),
     InventoryAdjusted: ({ data }) => ({
       quantity: data.quantity,
+      price: data.price,
     }),
     InventoryDecommissioned: () => ({
       quantity: 0,
@@ -60,6 +61,7 @@ export const InventoryProjection = projection("inventory")
     const existing = inventory.get(event.data.productId);
     if (existing) {
       existing.quantity = event.data.quantity;
+      existing.price = event.data.price;
     }
   })
   .on({ InventoryDecommissioned })
@@ -75,10 +77,14 @@ export const InventoryProjection = projection("inventory")
   })
   .on({ CartPublished })
   .do(async (event) => {
+    const counts = new Map<string, number>();
     for (const item of event.data.orderedProducts) {
-      const existing = inventory.get(item.productId);
+      counts.set(item.productId, (counts.get(item.productId) ?? 0) + 1);
+    }
+    for (const [productId, count] of counts) {
+      const existing = inventory.get(productId);
       if (existing) {
-        existing.quantity = Math.max(0, existing.quantity - 1);
+        existing.quantity = Math.max(0, existing.quantity - count);
       }
     }
   })

@@ -14,6 +14,7 @@ const PRODUCTS = [
     description: "Professional 15-bar pressure",
     gradient: "linear-gradient(135deg, #2c1810 0%, #5c3a28 50%, #8b6914 100%)",
     icon: "☕",
+    image: "https://images.unsplash.com/photo-1548270311-3a9e56a480ff?w=400&h=400&fit=crop&q=80",
   },
   {
     productId: "prod-grinder",
@@ -22,6 +23,7 @@ const PRODUCTS = [
     description: "40mm conical burrs, 18 settings",
     gradient: "linear-gradient(135deg, #1a1a2e 0%, #3d3d5c 50%, #6b5b95 100%)",
     icon: "⚙️",
+    image: "https://images.unsplash.com/photo-1573066380308-24ff4c273dbc?w=400&h=400&fit=crop&q=80",
   },
   {
     productId: "prod-kettle",
@@ -30,6 +32,7 @@ const PRODUCTS = [
     description: "Temperature control, 1.2L capacity",
     gradient: "linear-gradient(135deg, #0c2340 0%, #1b4d6e 50%, #48a9a6 100%)",
     icon: "🫖",
+    image: "https://images.unsplash.com/photo-1621814688815-bae1c0dbc3d2?w=400&h=400&fit=crop&q=80",
   },
   {
     productId: "prod-scale",
@@ -38,6 +41,7 @@ const PRODUCTS = [
     description: "0.1g accuracy, built-in timer",
     gradient: "linear-gradient(135deg, #2d2d2d 0%, #4a4a4a 50%, #7c7c7c 100%)",
     icon: "⚖️",
+    image: "https://images.unsplash.com/photo-1559761340-04607d9f5bff?w=400&h=400&fit=crop&q=80",
   },
   {
     productId: "prod-filters",
@@ -46,6 +50,7 @@ const PRODUCTS = [
     description: "100 pack — unbleached, V60 & Chemex",
     gradient: "linear-gradient(135deg, #8b7355 0%, #c4a77d 50%, #e8d5b7 100%)",
     icon: "🫧",
+    image: "https://images.unsplash.com/photo-1498603536246-15572faa67a6?w=400&h=400&fit=crop&q=80",
   },
 ];
 
@@ -68,13 +73,8 @@ type EventEntry = {
 
 // ── Event colors ─────────────────────────────────────────────────────
 const EVENT_COLORS: Record<string, { bg: string; fg: string; label: string }> = {
-  ItemAdded:            { bg: "#e3f2fd", fg: "#1565c0", label: "ItemAdded" },
-  ItemRemoved:          { bg: "#fce4ec", fg: "#c62828", label: "ItemRemoved" },
-  CartCleared:          { bg: "#fff3e0", fg: "#e65100", label: "CartCleared" },
   CartSubmitted:        { bg: "#e8f5e9", fg: "#2e7d32", label: "CartSubmitted" },
   CartPublished:        { bg: "#f3e5f5", fg: "#6a1b9a", label: "CartPublished" },
-  ItemArchiveRequested: { bg: "#fff8e1", fg: "#f9a825", label: "ItemArchiveRequested" },
-  ItemArchived:         { bg: "#efebe9", fg: "#4e342e", label: "ItemArchived" },
   PriceChanged:         { bg: "#e0f7fa", fg: "#00838f", label: "PriceChanged" },
   InventoryImported:    { bg: "#f1f8e9", fg: "#558b2f", label: "InventoryImported" },
   InventoryAdjusted:    { bg: "#dcedc8", fg: "#33691e", label: "InventoryAdjusted" },
@@ -279,6 +279,12 @@ body {
   position: relative;
   overflow: hidden;
 }
+.product-img img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
 .product-img::after {
   content: '';
   position: absolute;
@@ -385,6 +391,12 @@ body {
   justify-content: center;
   font-size: 32px;
   flex-shrink: 0;
+  overflow: hidden;
+}
+.cart-item-img img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 .cart-item-info { flex: 1; min-width: 0; }
 .cart-item-name { font-weight: 600; font-size: 14px; color: var(--text-link); margin-bottom: 2px; }
@@ -918,7 +930,7 @@ function ProductCard({
   return (
     <div className="product-card">
       <div className="product-img" style={{ background: product.gradient }}>
-        {product.icon}
+        <img src={product.image} alt={product.name} loading="lazy" />
       </div>
       <div className="product-body">
         <div className="product-name">{product.name}</div>
@@ -1035,49 +1047,31 @@ function EventPanel({
   );
 }
 
-// ── Cart Drawer ──────────────────────────────────────────────────────
+// ── Cart Drawer (reads from local cart state, only PlaceOrder talks to server)
 function CartDrawer({
-  open, onClose, cartId, onNewCart, onAddProduct, liveStock,
+  open, onClose, cart, onIncrement, onDecrement, onClear, onSubmit, submitting, liveStock,
 }: {
   open: boolean;
   onClose: () => void;
-  cartId: string;
-  onNewCart: () => void;
-  onAddProduct: (product: (typeof PRODUCTS)[number]) => void;
+  cart: Record<string, number>;
+  onIncrement: (productId: string) => void;
+  onDecrement: (productId: string) => void;
+  onClear: () => void;
+  onSubmit: () => void;
+  submitting: boolean;
   liveStock: Record<string, number>;
 }) {
-  const utils = trpc.useUtils();
-  const cart = trpc.getCart.useQuery(cartId, { enabled: !!cartId });
-
-  const invalidateCart = () => utils.getCart.invalidate(cartId);
-
-  const removeItem = trpc.RemoveItem.useMutation({ onSuccess: invalidateCart });
-  const clearCart = trpc.ClearCart.useMutation({ onSuccess: invalidateCart });
-  const submitCart = trpc.SubmitCart.useMutation({
-    onSuccess: () => {
-      invalidateCart();
-      utils.getProducts.invalidate();
-      utils.listOrders.invalidate();
-      onNewCart();
-      onClose();
-    },
-  });
-
   if (!open) return null;
 
-  const items = cart.data?.items ?? [];
-  const status = cart.data?.status ?? "Open";
-  const subtotal = items
-    .reduce((sum, i) => sum + parseFloat(i.price || "0"), 0)
-    .toFixed(2);
-
   const productMap = Object.fromEntries(PRODUCTS.map((p) => [p.productId, p]));
-
-  // Group items by productId
-  const grouped = items.reduce<Record<string, typeof items>>((acc, item) => {
-    (acc[item.productId] ??= []).push(item);
-    return acc;
-  }, {});
+  const entries = Object.entries(cart).filter(([, qty]) => qty > 0);
+  const totalItems = entries.reduce((sum, [, qty]) => sum + qty, 0);
+  const subtotal = entries
+    .reduce((sum, [pid, qty]) => {
+      const prod = productMap[pid];
+      return sum + qty * parseFloat(prod?.price ?? "0");
+    }, 0)
+    .toFixed(2);
 
   return (
     <>
@@ -1088,60 +1082,44 @@ function CartDrawer({
           <button className="drawer-close" onClick={onClose}>✕</button>
         </div>
 
-        {status !== "Open" && (
-          <div className={`cart-status-bar ${status === "Submitted" ? "submitted" : "published"}`}>
-            {status === "Submitted"
-              ? "📦 Order submitted — processing..."
-              : "✅ Order published successfully!"}
-          </div>
-        )}
-
         <div className="drawer-body">
-          {!cartId || items.length === 0 ? (
+          {entries.length === 0 ? (
             <div className="drawer-empty">
               <div className="empty-icon">🛒</div>
               <p>Your cart is empty</p>
             </div>
           ) : (
-            Object.entries(grouped).map(([productId, productItems]) => {
+            entries.map(([productId, qty]) => {
               const prod = productMap[productId];
-              const first = productItems[0];
-              const qty = productItems.length;
-              const lineTotal = (qty * parseFloat(first.price || "0")).toFixed(2);
+              if (!prod) return null;
+              const lineTotal = (qty * parseFloat(prod.price)).toFixed(2);
               return (
                 <div key={productId} className="cart-item">
-                  <div className="cart-item-img" style={{ background: prod?.gradient ?? "#eee" }}>
-                    {prod?.icon ?? "📦"}
+                  <div className="cart-item-img" style={{ background: prod.gradient }}>
+                    {prod.image
+                      ? <img src={prod.image} alt={prod.name} loading="lazy" />
+                      : prod.icon}
                   </div>
                   <div className="cart-item-info">
-                    <div className="cart-item-name">{first.name}</div>
-                    <div className="cart-item-desc">{prod?.description ?? ""}</div>
+                    <div className="cart-item-name">{prod.name}</div>
+                    <div className="cart-item-desc">{prod.description}</div>
                     <div className="cart-item-price">${lineTotal}</div>
-                    {status === "Open" && (
-                      <div className="cart-qty">
-                        <button
-                          className="cart-qty-btn"
-                          disabled={removeItem.isPending}
-                          onClick={() =>
-                            removeItem.mutate({
-                              stream: cartId,
-                              itemId: productItems[qty - 1].itemId,
-                              productId,
-                            })
-                          }
-                        >
-                          {qty === 1 ? "🗑" : "−"}
-                        </button>
-                        <div className="cart-qty-val">{qty}</div>
-                        <button
-                          className="cart-qty-btn"
-                          disabled={qty >= (liveStock[productId] ?? 0)}
-                          onClick={() => prod && onAddProduct(prod)}
-                        >
-                          +
-                        </button>
-                      </div>
-                    )}
+                    <div className="cart-qty">
+                      <button
+                        className="cart-qty-btn"
+                        onClick={() => onDecrement(productId)}
+                      >
+                        {qty === 1 ? "🗑" : "−"}
+                      </button>
+                      <div className="cart-qty-val">{qty}</div>
+                      <button
+                        className="cart-qty-btn"
+                        disabled={qty >= (liveStock[productId] ?? 0)}
+                        onClick={() => onIncrement(productId)}
+                      >
+                        +
+                      </button>
+                    </div>
                   </div>
                 </div>
               );
@@ -1149,30 +1127,22 @@ function CartDrawer({
           )}
         </div>
 
-        {items.length > 0 && (
+        {entries.length > 0 && (
           <div className="drawer-footer">
             <div className="drawer-subtotal">
-              <span>Subtotal ({items.length} item{items.length > 1 ? "s" : ""}):</span>
+              <span>Subtotal ({totalItems} item{totalItems > 1 ? "s" : ""}):</span>
               <strong>${subtotal}</strong>
             </div>
-            {status === "Open" ? (
-              <>
-                <button
-                  className="checkout-btn"
-                  onClick={() => submitCart.mutate({ stream: cartId })}
-                  disabled={submitCart.isPending}
-                >
-                  {submitCart.isPending ? "Submitting..." : "Proceed to Checkout"}
-                </button>
-                <button className="clear-btn" onClick={() => clearCart.mutate({ stream: cartId })}>
-                  Clear cart
-                </button>
-              </>
-            ) : (
-              <button className="new-cart-btn" onClick={() => { onNewCart(); onClose(); }}>
-                Start New Cart
-              </button>
-            )}
+            <button
+              className="checkout-btn"
+              onClick={onSubmit}
+              disabled={submitting}
+            >
+              {submitting ? "Placing order..." : "Place Order"}
+            </button>
+            <button className="clear-btn" onClick={onClear}>
+              Clear cart
+            </button>
           </div>
         )}
       </div>
@@ -1251,9 +1221,6 @@ function OrdersView() {
 function AdminView() {
   const utils = trpc.useUtils();
   const products = trpc.getProducts.useQuery();
-  const changePrice = trpc.ChangePrice.useMutation({
-    onSuccess: () => utils.getProducts.invalidate(),
-  });
   const adjustInventory = trpc.AdjustInventory.useMutation({
     onSuccess: () => utils.getProducts.invalidate(),
   });
@@ -1262,7 +1229,7 @@ function AdminView() {
   });
 
   const [priceInputs, setPriceInputs] = useState<Record<string, string>>({});
-  const [invInputs, setInvInputs] = useState<Record<string, string>>({});
+  const [qtyInputs, setQtyInputs] = useState<Record<string, string>>({});
 
   const data = products.data ?? [];
   const productMap = Object.fromEntries(PRODUCTS.map((p) => [p.productId, p]));
@@ -1272,68 +1239,15 @@ function AdminView() {
       <h2>Admin</h2>
 
       <div className="admin-block">
-        <h3>Price Editor</h3>
-        <div className="admin-table-wrap">
-          <table className="admin-table">
-            <thead>
-              <tr>
-                <th>Product</th>
-                <th>Current Price</th>
-                <th>New Price</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              {data.map((p) => {
-                const meta = productMap[p.productId];
-                return (
-                  <tr key={p.productId}>
-                    <td className="admin-product-name">{meta?.icon} {meta?.name ?? p.productId}</td>
-                    <td className="admin-current">${p.price.toFixed(2)}</td>
-                    <td>
-                      <input
-                        className="admin-input"
-                        type="number"
-                        step="0.01"
-                        min="0"
-                        placeholder={p.price.toFixed(2)}
-                        value={priceInputs[p.productId] ?? ""}
-                        onChange={(e) =>
-                          setPriceInputs((prev) => ({ ...prev, [p.productId]: e.target.value }))
-                        }
-                      />
-                    </td>
-                    <td>
-                      <button
-                        className="admin-update-btn"
-                        disabled={!priceInputs[p.productId] || changePrice.isPending}
-                        onClick={() => {
-                          const val = parseFloat(priceInputs[p.productId]);
-                          if (!isNaN(val) && val >= 0) {
-                            changePrice.mutate({ productId: p.productId, price: val });
-                            setPriceInputs((prev) => ({ ...prev, [p.productId]: "" }));
-                          }
-                        }}
-                      >
-                        Update
-                      </button>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      <div className="admin-block">
         <h3>Inventory Manager</h3>
         <div className="admin-table-wrap">
           <table className="admin-table">
             <thead>
               <tr>
                 <th>Product</th>
-                <th>Current Stock</th>
+                <th>Price</th>
+                <th>Stock</th>
+                <th>New Price</th>
                 <th>New Stock</th>
                 <th></th>
               </tr>
@@ -1341,10 +1255,28 @@ function AdminView() {
             <tbody>
               {data.map((p) => {
                 const meta = productMap[p.productId];
+                const isActive = p.inventory > 0;
+                const newPrice = priceInputs[p.productId] ?? "";
+                const newQty = qtyInputs[p.productId] ?? "";
+                const hasChanges = newPrice !== "" || newQty !== "";
                 return (
-                  <tr key={p.productId}>
+                  <tr key={p.productId} style={isActive ? {} : { opacity: 0.5 }}>
                     <td className="admin-product-name">{meta?.icon} {meta?.name ?? p.productId}</td>
+                    <td className="admin-current">${p.price.toFixed(2)}</td>
                     <td className="admin-current">{p.inventory}</td>
+                    <td>
+                      <input
+                        className="admin-input"
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        placeholder={p.price.toFixed(2)}
+                        value={newPrice}
+                        onChange={(e) =>
+                          setPriceInputs((prev) => ({ ...prev, [p.productId]: e.target.value }))
+                        }
+                      />
+                    </td>
                     <td>
                       <input
                         className="admin-input"
@@ -1352,37 +1284,42 @@ function AdminView() {
                         step="1"
                         min="0"
                         placeholder={String(p.inventory)}
-                        value={invInputs[p.productId] ?? ""}
+                        value={newQty}
                         onChange={(e) =>
-                          setInvInputs((prev) => ({ ...prev, [p.productId]: e.target.value }))
+                          setQtyInputs((prev) => ({ ...prev, [p.productId]: e.target.value }))
                         }
                       />
                     </td>
                     <td style={{ display: "flex", gap: "8px" }}>
                       <button
                         className="admin-update-btn"
-                        disabled={!invInputs[p.productId] || adjustInventory.isPending}
+                        disabled={!hasChanges || adjustInventory.isPending}
                         onClick={() => {
-                          const val = parseInt(invInputs[p.productId], 10);
-                          if (!isNaN(val) && val >= 0) {
+                          const price = newPrice !== "" ? parseFloat(newPrice) : p.price;
+                          const qty = newQty !== "" ? parseInt(newQty, 10) : p.inventory;
+                          if (!isNaN(price) && price >= 0 && !isNaN(qty) && qty >= 0) {
                             adjustInventory.mutate({
                               productId: p.productId,
-                              quantity: val,
+                              price,
+                              quantity: qty,
                             });
-                            setInvInputs((prev) => ({ ...prev, [p.productId]: "" }));
+                            setPriceInputs((prev) => ({ ...prev, [p.productId]: "" }));
+                            setQtyInputs((prev) => ({ ...prev, [p.productId]: "" }));
                           }
                         }}
                       >
                         Update
                       </button>
-                      <button
-                        className="admin-update-btn"
-                        style={{ background: "#fff", borderColor: "var(--danger)", color: "var(--danger)" }}
-                        disabled={decommission.isPending}
-                        onClick={() => decommission.mutate({ productId: p.productId })}
-                      >
-                        Decommission
-                      </button>
+                      {isActive && (
+                        <button
+                          className="admin-update-btn"
+                          style={{ background: "#fff", borderColor: "var(--danger)", color: "var(--danger)" }}
+                          disabled={decommission.isPending}
+                          onClick={() => decommission.mutate({ productId: p.productId })}
+                        >
+                          Decommission
+                        </button>
+                      )}
                     </td>
                   </tr>
                 );
@@ -1405,7 +1342,7 @@ function Toast({ message }: { message: string | null }) {
 type Tab = "shop" | "orders" | "admin";
 
 function CartApp() {
-  const [cartId, setCartId] = useState<string>("");
+  const [localCart, setLocalCart] = useState<Record<string, number>>({});
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const [addingProduct, setAddingProduct] = useState<string | null>(null);
@@ -1415,13 +1352,13 @@ function CartApp() {
   const seenIds = useRef(new Set<number>());
 
   const utils = trpc.useUtils();
-  const cart = trpc.getCart.useQuery(cartId, { enabled: !!cartId });
-  const itemCount = cart.data?.items.length ?? 0;
+  const itemCount = Object.values(localCart).reduce((sum, qty) => sum + qty, 0);
 
   // Live product data from domain (prices + inventory)
   const productsQuery = trpc.getProducts.useQuery();
   const liveProducts = productsQuery.data ?? [];
   const liveMap = Object.fromEntries(liveProducts.map((p) => [p.productId, p]));
+  const liveStock = Object.fromEntries(liveProducts.map((p) => [p.productId, p.inventory]));
 
   // SSE subscription — receives every event as it's committed
   const onData = useCallback(
@@ -1431,21 +1368,16 @@ function CartApp() {
       seenIds.current.add(evt.id);
       setEvents((prev) => [...prev, evt]);
 
-      // Invalidate cart if the event is on the current cart stream
-      if (cartId && evt.stream === cartId) {
-        utils.getCart.invalidate(cartId);
-      }
-
-      // Reactive invalidation for other views
+      // Reactive invalidation for views
       if (evt.name === "PriceChanged" || evt.name === "InventoryImported" || evt.name === "InventoryAdjusted" || evt.name === "InventoryDecommissioned") {
         utils.getProducts.invalidate();
       }
       if (evt.name === "CartSubmitted" || evt.name === "CartPublished") {
         utils.listOrders.invalidate();
-        utils.getProducts.invalidate(); // inventory decrements on CartPublished
+        utils.getProducts.invalidate();
       }
     },
-    [cartId, utils]
+    [utils]
   );
 
   trpc.onEvent.useSubscription(undefined, {
@@ -1454,36 +1386,78 @@ function CartApp() {
     onError: () => setConnected(false),
   });
 
-  const addItem = trpc.AddItem.useMutation({
-    onSuccess: (data) => {
-      setCartId(data.cartId);
-      utils.getCart.invalidate(data.cartId);
+  // Local cart operations (no server calls)
+  const productMap = Object.fromEntries(PRODUCTS.map((p) => [p.productId, p]));
+
+  const handleAdd = (product: (typeof PRODUCTS)[number]) => {
+    setAddingProduct(product.productId);
+    setLocalCart((prev) => ({
+      ...prev,
+      [product.productId]: (prev[product.productId] ?? 0) + 1,
+    }));
+    setToast("Added to cart");
+    setTimeout(() => {
+      setToast(null);
       setAddingProduct(null);
-      setToast("Added to cart");
-      setTimeout(() => setToast(null), 2000);
+    }, 800);
+  };
+
+  const handleIncrement = (productId: string) => {
+    setLocalCart((prev) => ({
+      ...prev,
+      [productId]: (prev[productId] ?? 0) + 1,
+    }));
+  };
+
+  const handleDecrement = (productId: string) => {
+    setLocalCart((prev) => {
+      const qty = (prev[productId] ?? 0) - 1;
+      if (qty <= 0) {
+        const { [productId]: _, ...rest } = prev;
+        return rest;
+      }
+      return { ...prev, [productId]: qty };
+    });
+  };
+
+  const handleClear = () => setLocalCart({});
+
+  // PlaceOrder — the only mutation that touches the server
+  const placeOrder = trpc.PlaceOrder.useMutation({
+    onSuccess: () => {
+      setLocalCart({});
+      setDrawerOpen(false);
+      utils.getProducts.invalidate();
+      utils.listOrders.invalidate();
+      setToast("Order placed successfully!");
+      setTimeout(() => setToast(null), 3000);
     },
     onError: (err) => {
-      setAddingProduct(null);
-      setToast(
-        err.message.includes("invariant")
-          ? "Could not add item — check stock availability"
-          : "Could not add item"
-      );
+      setToast(err.message.includes("invariant")
+        ? "Could not place order — check stock availability"
+        : "Could not place order");
       setTimeout(() => setToast(null), 3000);
     },
   });
 
-  const handleAdd = (product: (typeof PRODUCTS)[number]) => {
-    const live = liveMap[product.productId];
-    const price = live && live.price > 0 ? live.price.toFixed(2) : product.price;
-    setAddingProduct(product.productId);
-    addItem.mutate({
-      stream: cartId || undefined,
-      name: product.name,
-      description: product.description,
-      price,
-      productId: product.productId,
-    });
+  const handleSubmit = () => {
+    const items = Object.entries(localCart)
+      .filter(([, qty]) => qty > 0)
+      .flatMap(([productId, qty]) => {
+        const prod = productMap[productId];
+        if (!prod) return [];
+        const live = liveMap[productId];
+        const price = live && live.price > 0 ? live.price.toFixed(2) : prod.price;
+        return Array.from({ length: qty }, () => ({
+          itemId: crypto.randomUUID(),
+          name: prod.name,
+          description: prod.description,
+          price,
+          productId: prod.productId,
+        }));
+      });
+    if (items.length === 0) return;
+    placeOrder.mutate({ items });
   };
 
   return (
@@ -1564,10 +1538,13 @@ function CartApp() {
       <CartDrawer
         open={drawerOpen}
         onClose={() => setDrawerOpen(false)}
-        cartId={cartId}
-        onNewCart={() => setCartId("")}
-        onAddProduct={handleAdd}
-        liveStock={Object.fromEntries(liveProducts.map((p) => [p.productId, p.inventory]))}
+        cart={localCart}
+        onIncrement={handleIncrement}
+        onDecrement={handleDecrement}
+        onClear={handleClear}
+        onSubmit={handleSubmit}
+        submitting={placeOrder.isPending}
+        liveStock={liveStock}
       />
 
       <Toast message={toast} />

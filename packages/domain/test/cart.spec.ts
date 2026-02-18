@@ -30,103 +30,37 @@ describe("Cart", () => {
     clearInventory();
   });
 
-  describe("spec: Add Item", () => {
-    it("should add an item to the cart", async () => {
+  describe("spec: Place Order", () => {
+    it("should place an order with items", async () => {
       const t = target();
-      const item = sampleItem();
-      await app.do("AddItem", t, item);
+      await app.do("PlaceOrder", t, { items: [sampleItem()] });
       const snap = await app.load(Cart, t.stream);
-      expect(snap.state.items).toHaveLength(1);
-      expect(snap.state.items[0].name).toBe("Widget");
+      expect(snap.state.status).toBe("Submitted");
+      expect(snap.state.totalPrice).toBe(9.99);
     });
 
-    it("should allow adding many items (no hardcoded cap)", async () => {
-      const t = target();
-      for (let i = 1; i <= 15; i++) {
-        await app.do("AddItem", t, sampleItem({ itemId: `i${i}` }));
-      }
-      const snap = await app.load(Cart, t.stream);
-      expect(snap.state.items).toHaveLength(15);
-    });
-  });
-
-  describe("spec: Remove Item", () => {
-    it("should reject removing from empty cart", async () => {
+    it("should reject placing an order with empty items", async () => {
       const t = target();
       await expect(
-        app.do("RemoveItem", t, { itemId: "x", productId: "p" })
+        app.do("PlaceOrder", t, { items: [] })
       ).rejects.toThrow();
     });
 
-    it("should remove an existing item", async () => {
+    it("should reject placing a second order on the same stream", async () => {
       const t = target();
-      const item = sampleItem({ itemId: "i1", productId: "p1" });
-      await app.do("AddItem", t, item);
-      await app.do("RemoveItem", t, {
-        itemId: "i1",
-        productId: "p1",
-      });
-      const snap = await app.load(Cart, t.stream);
-      expect(snap.state.items).toHaveLength(0);
-    });
-  });
-
-  describe("spec: Clear Cart", () => {
-    it("should clear all items from the cart", async () => {
-      const t = target();
-      await app.do("AddItem", t, sampleItem({ itemId: "i1" }));
-      await app.do("ClearCart", t, {});
-      const snap = await app.load(Cart, t.stream);
-      expect(snap.state.items).toHaveLength(0);
-    });
-  });
-
-  describe("spec: Archive Item", () => {
-    it("should archive an item from the cart", async () => {
-      const t = target();
-      await app.do(
-        "AddItem",
-        t,
-        sampleItem({ itemId: "i1", productId: "p1" })
-      );
-      await app.do("ArchiveItem", t, {
-        productId: "p1",
-        itemId: "i1",
-      });
-      const snap = await app.load(Cart, t.stream);
-      expect(snap.state.items).toHaveLength(0);
-    });
-  });
-
-  describe("spec: Submit Cart", () => {
-    it("should submit a cart with items", async () => {
-      const t = target();
-      await app.do(
-        "AddItem",
-        t,
-        sampleItem({ itemId: "i1", price: "10.00" })
-      );
-      await app.do("SubmitCart", t, {});
-      const snap = await app.load(Cart, t.stream);
-      expect(snap.state.status).toBe("Submitted");
-      expect(snap.state.totalPrice).toBe(10.0);
-    });
-
-    it("should reject submitting an empty cart", async () => {
-      const t = target();
-      await expect(app.do("SubmitCart", t, {})).rejects.toThrow();
+      await app.do("PlaceOrder", t, { items: [sampleItem()] });
+      await expect(
+        app.do("PlaceOrder", t, { items: [sampleItem()] })
+      ).rejects.toThrow();
     });
   });
 
   describe("spec: Publish Cart (via reaction)", () => {
-    it("should publish cart after submission", async () => {
+    it("should publish cart after placement", async () => {
       const t = target();
-      await app.do(
-        "AddItem",
-        t,
-        sampleItem({ itemId: "i1", price: "25.50" })
-      );
-      await app.do("SubmitCart", t, {});
+      await app.do("PlaceOrder", t, {
+        items: [sampleItem({ price: "25.50" })],
+      });
       await drainAll();
       const snap = await app.load(Cart, t.stream);
       expect(snap.state.status).toBe("Published");
@@ -197,25 +131,28 @@ describe("Inventory projection", () => {
     await app.do("ImportInventory", sys("prod-1"), { name: "Widget", price: 9.99, quantity: 10, productId: "prod-1" });
     await drainAll();
 
-    // Create and submit a cart with the product
     const cart = target();
-    await app.do("AddItem", cart, sampleItem({ itemId: "i1", productId: "prod-1", price: "9.99" }));
-    await app.do("SubmitCart", cart, {});
+    await app.do("PlaceOrder", cart, {
+      items: [sampleItem({ itemId: "i1", productId: "prod-1", price: "9.99" })],
+    });
     await drainAll();
 
     const items = getInventoryItems();
     expect(items["prod-1"].quantity).toBe(9);
   });
 
-  it("should decrement multiple items of same product in one cart", async () => {
+  it("should decrement multiple items of same product in one order", async () => {
     const sys = (id: string) => ({ stream: id, actor: { id: "system", name: "System" } });
     await app.do("ImportInventory", sys("prod-1"), { name: "Widget", price: 9.99, quantity: 10, productId: "prod-1" });
     await drainAll();
 
     const cart = target();
-    await app.do("AddItem", cart, sampleItem({ itemId: "i1", productId: "prod-1", price: "9.99" }));
-    await app.do("AddItem", cart, sampleItem({ itemId: "i2", productId: "prod-1", price: "9.99" }));
-    await app.do("SubmitCart", cart, {});
+    await app.do("PlaceOrder", cart, {
+      items: [
+        sampleItem({ itemId: "i1", productId: "prod-1", price: "9.99" }),
+        sampleItem({ itemId: "i2", productId: "prod-1", price: "9.99" }),
+      ],
+    });
     await drainAll();
 
     const items = getInventoryItems();
@@ -228,9 +165,12 @@ describe("Inventory projection", () => {
     await drainAll();
 
     const cart = target();
-    await app.do("AddItem", cart, sampleItem({ itemId: "i1", productId: "prod-1", price: "9.99" }));
-    await app.do("AddItem", cart, sampleItem({ itemId: "i2", productId: "prod-1", price: "9.99" }));
-    await app.do("SubmitCart", cart, {});
+    await app.do("PlaceOrder", cart, {
+      items: [
+        sampleItem({ itemId: "i1", productId: "prod-1", price: "9.99" }),
+        sampleItem({ itemId: "i2", productId: "prod-1", price: "9.99" }),
+      ],
+    });
     await drainAll();
 
     const items = getInventoryItems();
@@ -252,13 +192,11 @@ describe("Inventory projection", () => {
     await app.do("ImportInventory", sys("prod-1"), { name: "Widget", price: 9.99, quantity: 10, productId: "prod-1" });
     await drainAll();
 
-    // Admin adjusts stock to 50
-    await app.do("AdjustInventory", sys("prod-1"), { quantity: 50, productId: "prod-1" });
+    await app.do("AdjustInventory", sys("prod-1"), { quantity: 50, price: 9.99, productId: "prod-1" });
     await drainAll();
 
     const items = getInventoryItems();
     expect(items["prod-1"].quantity).toBe(50);
-    // Name and price should be preserved
     expect(items["prod-1"].name).toBe("Widget");
     expect(items["prod-1"].price).toBe(9.99);
   });
@@ -289,7 +227,6 @@ describe("Inventory projection", () => {
     await drainAll();
     expect(getInventoryItems()["prod-1"]).toBeUndefined();
 
-    // Re-import brings it back
     await app.do("ImportInventory", sys("prod-1"), { name: "Widget v2", price: 12.99, quantity: 20, productId: "prod-1" });
     await drainAll();
 
@@ -307,10 +244,11 @@ describe("Orders projection", () => {
     clearInventory();
   });
 
-  it("should materialize order from cart events", async () => {
+  it("should materialize order from PlaceOrder", async () => {
     const t = target();
-    await app.do("AddItem", t, sampleItem({ itemId: "i1", price: "10.00" }));
-    await app.do("SubmitCart", t, {});
+    await app.do("PlaceOrder", t, {
+      items: [sampleItem({ itemId: "i1", price: "10.00" })],
+    });
     await drainAll();
 
     const orders = getOrders();
@@ -323,8 +261,9 @@ describe("Orders projection", () => {
 
   it("should update order status on CartPublished", async () => {
     const t = target();
-    await app.do("AddItem", t, sampleItem({ itemId: "i1", price: "25.50" }));
-    await app.do("SubmitCart", t, {});
+    await app.do("PlaceOrder", t, {
+      items: [sampleItem({ itemId: "i1", price: "25.50" })],
+    });
     await drainAll();
 
     const orders = getOrders();
@@ -339,10 +278,12 @@ describe("Orders projection", () => {
   it("should track multiple orders", async () => {
     const t1 = target();
     const t2 = target();
-    await app.do("AddItem", t1, sampleItem({ itemId: "i1", price: "10.00" }));
-    await app.do("AddItem", t2, sampleItem({ itemId: "i2", price: "20.00" }));
-    await app.do("SubmitCart", t1, {});
-    await app.do("SubmitCart", t2, {});
+    await app.do("PlaceOrder", t1, {
+      items: [sampleItem({ itemId: "i1", price: "10.00" })],
+    });
+    await app.do("PlaceOrder", t2, {
+      items: [sampleItem({ itemId: "i2", price: "20.00" })],
+    });
     await drainAll();
 
     const orders = getOrders();
