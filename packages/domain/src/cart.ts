@@ -1,11 +1,12 @@
-import { state } from "@rotorsoft/act";
+import { slice, state } from "@rotorsoft/act";
 import { mustBeOpen } from "./invariants.js";
+import { OrdersProjection } from "./orders.js";
 import {
-  PlaceOrder,
-  PublishCart,
-  CartSubmitted,
   CartPublished,
   CartState,
+  CartSubmitted,
+  PlaceOrder,
+  PublishCart,
 } from "./schemas.js";
 
 export const Cart = state({ Cart: CartState })
@@ -36,3 +37,18 @@ export const Cart = state({ Cart: CartState })
   .on({ PublishCart })
   .emit((data) => ["CartPublished", data])
   .build();
+
+export const CartSlice = slice()
+  .withState(Cart)
+  .withProjection(OrdersProjection)
+  // When a cart is submitted, publish it
+  .on("CartSubmitted")
+  .do(async function publishCart(event, stream, app) {
+    await app.do(
+      "PublishCart",
+      { stream, actor: { id: "system", name: "CartPublisher" } },
+      { orderedProducts: event.data.orderedProducts, totalPrice: event.data.totalPrice },
+      event
+    );
+  })
+  .to((event) => ({ target: event.stream })).build();

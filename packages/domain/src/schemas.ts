@@ -37,24 +37,6 @@ export const CartState = z.object({
   totalPrice: z.number(),
 });
 
-// === Price Actions ===
-export const ChangePrice = z.object({
-  price: z.number(),
-  productId: z.string(),
-});
-
-// === Price Events ===
-export const PriceChanged = z.object({
-  price: z.number(),
-  productId: z.string(),
-});
-
-// === Price State ===
-export const PriceState = z.object({
-  price: z.number(),
-  productId: z.string(),
-});
-
 // === Inventory Actions ===
 export const ImportInventory = z.object({
   name: z.string(),

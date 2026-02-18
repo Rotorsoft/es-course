@@ -1,8 +1,8 @@
-import { state, projection } from "@rotorsoft/act";
+import { projection, slice, state } from "@rotorsoft/act";
 import {
-  TrackCartActivity,
   CartActivityTracked,
   CartTrackingState,
+  TrackCartActivity,
 } from "./schemas.js";
 
 // === Cart Tracking aggregate (append-only, no invariants) ===
@@ -40,6 +40,11 @@ export const CartTrackingProjection = projection("cart-tracking")
       timestamp: event.created.toISOString(),
     });
   })
+  .build();
+
+export const CartTrackingSlice = slice()
+  .withState(CartTracking)
+  .withProjection(CartTrackingProjection)
   .build();
 
 export function getCartActivities(): CartActivity[] {

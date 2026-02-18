@@ -1,8 +1,7 @@
-import { Price, getOrders, getInventoryItems, getCartActivities, app } from "@rotorsoft/es-course-domain";
 import type { Target } from "@rotorsoft/act";
+import { app, getCartActivities, getInventoryItems, getOrders } from "@rotorsoft/es-course-domain";
+import { initTRPC, tracked } from "@trpc/server";
 import { EventEmitter } from "node:events";
-import { initTRPC } from "@trpc/server";
-import { tracked } from "@trpc/server";
 import { z } from "zod";
 
 const t = initTRPC.create();
@@ -77,24 +76,6 @@ export const router = t.router({
       await app.do("PlaceOrder", target, { items: input.items });
       await drainAll();
       return { success: true, orderId: target.stream };
-    }),
-
-  // Price commands
-  ChangePrice: t.procedure
-    .input(
-      z.object({
-        productId: z.string(),
-        price: z.number(),
-      })
-    )
-    .mutation(async ({ input }) => {
-      await app.do(
-        "ChangePrice",
-        { stream: input.productId, actor: { id: "system", name: "System" } },
-        input
-      );
-      await drainAll();
-      return { success: true };
     }),
 
   // Inventory commands
@@ -175,11 +156,6 @@ export const router = t.router({
     return getCartActivities();
   }),
 
-  getPrice: t.procedure.input(z.string()).query(async ({ input }) => {
-    const snap = await app.load(Price, input);
-    return snap.state;
-  }),
-
   getInventory: t.procedure.query(async () => {
     return getInventoryItems();
   }),
@@ -202,7 +178,7 @@ export const router = t.router({
   }),
 
   // Subscription — push events via SSE
-  onEvent: t.procedure.subscription(async function* ({ signal }) {
+  onEvent: t.procedure.subscription(async function*({ signal }) {
     // Send all existing events first
     const existing = await app.query_array({ after: -1 });
     for (const e of serializeEvents(existing)) {

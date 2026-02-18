@@ -177,16 +177,6 @@ describe("Inventory projection", () => {
     expect(items["prod-1"].quantity).toBe(0);
   });
 
-  it("should update price on PriceChanged", async () => {
-    const sys = (id: string) => ({ stream: id, actor: { id: "system", name: "System" } });
-    await app.do("ImportInventory", sys("prod-1"), { name: "Widget", price: 9.99, quantity: 10, productId: "prod-1" });
-    await app.do("ChangePrice", sys("prod-1"), { price: 14.99, productId: "prod-1" });
-    await drainAll();
-
-    const items = getInventoryItems();
-    expect(items["prod-1"].price).toBe(14.99);
-  });
-
   it("should update quantity on AdjustInventory (admin update)", async () => {
     const sys = (id: string) => ({ stream: id, actor: { id: "system", name: "System" } });
     await app.do("ImportInventory", sys("prod-1"), { name: "Widget", price: 9.99, quantity: 10, productId: "prod-1" });

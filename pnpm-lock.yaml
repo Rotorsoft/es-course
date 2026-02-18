@@ -27,8 +27,8 @@ importers:
   packages/app:
     dependencies:
       '@rotorsoft/act':
-        specifier: ^0.12.0
-        version: 0.12.0
+        specifier: ^0.13.0
+        version: 0.13.0
       '@rotorsoft/es-course-domain':
         specifier: workspace:*
         version: link:../domain
@@ -79,8 +79,8 @@ importers:
   packages/domain:
     dependencies:
       '@rotorsoft/act':
-        specifier: ^0.12.0
-        version: 0.12.0
+        specifier: ^0.13.0
+        version: 0.13.0
       zod:
         specifier: ^4.3.6
         version: 4.3.6
@@ -490,8 +490,8 @@ packages:
     cpu: [x64]
     os: [win32]
 
-  '@rotorsoft/act@0.12.0':
-    resolution: {integrity: sha512-ncK2xbpdjeeUNoPITqm9zBeZub8AtKBdAD/i0/WhHOl3CvShUyth5/Cjz0FSqe3+FIhReqnMde7Kd8EgAuLQzA==}
+  '@rotorsoft/act@0.13.0':
+    resolution: {integrity: sha512-i0T6kosS1/LiUbDbK8nCMU96+wi9j42kY55511ZUtImzLMBGwGYPnjnbkSsBiG+8cEL18cYL/EyqVf3RKxQ9HQ==}
     engines: {node: '>=22.18.0'}
 
   '@standard-schema/spec@1.1.0':
@@ -1322,7 +1322,7 @@ snapshots:
   '@rollup/rollup-win32-x64-msvc@4.57.1':
     optional: true
 
-  '@rotorsoft/act@0.12.0':
+  '@rotorsoft/act@0.13.0':
     dependencies:
       pino: 10.3.1
       pino-pretty: 13.1.3

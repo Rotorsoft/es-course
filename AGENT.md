@@ -26,7 +26,6 @@ Built on `@rotorsoft/act` — aggregates emit events that patch state, reactions
 
 - `schemas.ts` — Zod schemas for all action payloads, event payloads, and state types
 - `cart.ts` — Cart aggregate (AddItem, RemoveItem, ClearCart, SubmitCart, PublishCart)
-- `price.ts` — Price aggregate (ChangePrice)
 - `inventory.ts` — Inventory aggregate (ImportInventory)
 - `orders.ts` — Orders read-model projection (materialized from CartSubmitted/CartPublished)
 - `invariants.ts` — Business rule constraints (max 3 items, must have items, must be open)

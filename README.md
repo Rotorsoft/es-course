@@ -33,7 +33,6 @@ packages/
   domain/src/
     schemas.ts        Zod schemas — actions, events, state
     cart.ts           Cart aggregate (PlaceOrder, PublishCart)
-    price.ts          Price aggregate (ChangePrice)
     inventory.ts      Inventory aggregate + projection
     tracking.ts       CartTracking aggregate + projection
     orders.ts         Orders projection (read model)
@@ -100,17 +99,9 @@ export const Cart = state({ Cart: CartState })
   .build();
 ```
 
-### Price Slice
-
-Simple aggregate for per-product price management. One stream per product.
-
-```
-ChangePrice ──► PriceChanged
-```
-
 ### Inventory Slice
 
-Per-product inventory tracking with import, adjust, and decommission lifecycle. Includes a **projection** that maintains a live read model of stock levels, and also reacts to `CartPublished` and `PriceChanged` events from other slices.
+Per-product inventory tracking with import, adjust, and decommission lifecycle. Includes a **projection** that maintains a live read model of stock levels, and also reacts to `CartPublished` events from other slices.
 
 ```
 ImportInventory ──► InventoryImported
@@ -124,11 +115,6 @@ export const InventoryProjection = projection("inventory")
   .on({ InventoryImported })
   .do(async (event) => {
     inventory.set(event.data.productId, { ... });
-  })
-  .on({ PriceChanged })
-  .do(async (event) => {
-    const existing = inventory.get(event.data.productId);
-    if (existing) existing.price = event.data.price;
   })
   .on({ CartPublished })
   .do(async (event) => {
@@ -294,7 +280,6 @@ Every action in the system produces events that flow through the store:
 |-------|--------|-------------|
 | `CartSubmitted` | Cart aggregate | Orders proj., Reaction (PublishCart) |
 | `CartPublished` | Cart aggregate (via reaction) | Orders proj., Inventory proj. |
-| `PriceChanged` | Price aggregate | Inventory proj. |
 | `InventoryImported` | Inventory aggregate | Inventory proj. |
 | `InventoryAdjusted` | Inventory aggregate | Inventory proj. |
 | `InventoryDecommissioned` | Inventory aggregate | Inventory proj. |
@@ -313,7 +298,6 @@ The tRPC router exposes mutations for commands, queries for read models, and an 
 | Endpoint | Description |
 |----------|-------------|
 | `PlaceOrder` | Submit a complete order (drains reactions + projections) |
-| `ChangePrice` | Update product price |
 | `ImportInventory` | Seed a product into inventory |
 | `AdjustInventory` | Update price/stock for a product |
 | `DecommissionInventory` | Remove a product from inventory |
@@ -366,7 +350,6 @@ npx vitest run --coverage
 | invariants.ts | 100% | 100% | 100% | 100% |
 | inventory.ts | 100% | 75% | 100% | 100% |
 | orders.ts | 100% | 50% | 100% | 100% |
-| price.ts | 100% | 100% | 100% | 100% |
 | schemas.ts | 100% | 100% | 100% | 100% |
 | tracking.ts | 100% | 100% | 100% | 100% |
 

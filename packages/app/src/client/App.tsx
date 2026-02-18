@@ -1,8 +1,6 @@
-import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { httpLink } from "@trpc/client";
-import { httpSubscriptionLink } from "@trpc/client";
-import { splitLink } from "@trpc/client";
+import { httpLink, httpSubscriptionLink, splitLink } from "@trpc/client";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { trpc } from "./trpc.js";
 
 // ── Product catalog (matches seed data) ──────────────────────────────
@@ -73,13 +71,12 @@ type EventEntry = {
 
 // ── Event colors ─────────────────────────────────────────────────────
 const EVENT_COLORS: Record<string, { bg: string; fg: string; label: string }> = {
-  CartSubmitted:        { bg: "#e8f5e9", fg: "#2e7d32", label: "CartSubmitted" },
-  CartPublished:        { bg: "#f3e5f5", fg: "#6a1b9a", label: "CartPublished" },
-  PriceChanged:         { bg: "#e0f7fa", fg: "#00838f", label: "PriceChanged" },
-  InventoryImported:    { bg: "#f1f8e9", fg: "#558b2f", label: "InventoryImported" },
-  InventoryAdjusted:    { bg: "#dcedc8", fg: "#33691e", label: "InventoryAdjusted" },
+  CartSubmitted: { bg: "#e8f5e9", fg: "#2e7d32", label: "CartSubmitted" },
+  CartPublished: { bg: "#f3e5f5", fg: "#6a1b9a", label: "CartPublished" },
+  InventoryImported: { bg: "#f1f8e9", fg: "#558b2f", label: "InventoryImported" },
+  InventoryAdjusted: { bg: "#dcedc8", fg: "#33691e", label: "InventoryAdjusted" },
   InventoryDecommissioned: { bg: "#ffcdd2", fg: "#b71c1c", label: "InventoryDecommissioned" },
-  CartActivityTracked:  { bg: "#e3f2fd", fg: "#1565c0", label: "CartActivityTracked" },
+  CartActivityTracked: { bg: "#e3f2fd", fg: "#1565c0", label: "CartActivityTracked" },
 };
 
 const DEFAULT_EVENT_COLOR = { bg: "#f5f5f5", fg: "#616161", label: "EVENT" };
@@ -1414,8 +1411,8 @@ function OrdersView() {
           const time = order.publishedAt ?? order.submittedAt;
           const timeStr = time
             ? new Date(time).toLocaleString("en-US", {
-                month: "short", day: "numeric", hour: "2-digit", minute: "2-digit",
-              })
+              month: "short", day: "numeric", hour: "2-digit", minute: "2-digit",
+            })
             : "";
 
           return (
@@ -1821,8 +1818,8 @@ function MarketingView() {
                     : a.sessionId;
                   const actionLabel =
                     a.action === "add" ? `Added ${meta?.name ?? a.productId}`
-                    : a.action === "remove" ? `Removed ${meta?.name ?? a.productId}`
-                    : `Cleared ${meta?.name ?? a.productId}`;
+                      : a.action === "remove" ? `Removed ${meta?.name ?? a.productId}`
+                        : `Cleared ${meta?.name ?? a.productId}`;
 
                   return (
                     <div key={`${a.sessionId}-${a.timestamp}-${i}`} className="mkt-tl-entry">
@@ -1881,7 +1878,7 @@ function CartApp() {
       setEvents((prev) => [...prev, evt]);
 
       // Reactive invalidation for views
-      if (evt.name === "PriceChanged" || evt.name === "InventoryImported" || evt.name === "InventoryAdjusted" || evt.name === "InventoryDecommissioned") {
+      if (evt.name === "InventoryImported" || evt.name === "InventoryAdjusted" || evt.name === "InventoryDecommissioned") {
         utils.getProducts.invalidate();
       }
       if (evt.name === "CartSubmitted" || evt.name === "CartPublished") {

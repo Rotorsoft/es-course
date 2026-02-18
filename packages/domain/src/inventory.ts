@@ -1,14 +1,14 @@
-import { projection, state } from "@rotorsoft/act";
+import { projection, slice, state } from "@rotorsoft/act";
+import { Cart } from "./cart.js";
 import {
-  ImportInventory,
-  InventoryImported,
   AdjustInventory,
-  InventoryAdjusted,
-  DecommissionInventory,
-  InventoryDecommissioned,
-  InventoryState,
-  PriceChanged,
   CartPublished,
+  DecommissionInventory,
+  ImportInventory,
+  InventoryAdjusted,
+  InventoryDecommissioned,
+  InventoryImported,
+  InventoryState,
 } from "./schemas.js";
 
 // === Per-product Inventory aggregate (write model) ===
@@ -68,13 +68,6 @@ export const InventoryProjection = projection("inventory")
   .do(async (event) => {
     inventory.delete(event.data.productId);
   })
-  .on({ PriceChanged })
-  .do(async (event) => {
-    const existing = inventory.get(event.data.productId);
-    if (existing) {
-      existing.price = event.data.price;
-    }
-  })
   .on({ CartPublished })
   .do(async (event) => {
     const counts = new Map<string, number>();
@@ -88,6 +81,12 @@ export const InventoryProjection = projection("inventory")
       }
     }
   })
+  .build();
+
+export const InventorySlice = slice()
+  .withState(Cart)
+  .withState(Inventory)
+  .withProjection(InventoryProjection)
   .build();
 
 export function getInventoryItems() {
