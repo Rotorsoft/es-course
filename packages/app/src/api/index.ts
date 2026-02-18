@@ -1,4 +1,4 @@
-import { Price, getOrders, getInventoryItems, app } from "@rotorsoft/es-course-domain";
+import { Price, getOrders, getInventoryItems, getCartActivities, app } from "@rotorsoft/es-course-domain";
 import type { Target } from "@rotorsoft/act";
 import { EventEmitter } from "node:events";
 import { initTRPC } from "@trpc/server";
@@ -151,7 +151,30 @@ export const router = t.router({
       return { success: true };
     }),
 
+  // Cart activity tracking (fire-and-forget, no drain)
+  TrackCartActivity: t.procedure
+    .input(
+      z.object({
+        sessionId: z.string(),
+        action: z.enum(["add", "remove", "clear"]),
+        productId: z.string(),
+        quantity: z.number(),
+      })
+    )
+    .mutation(async ({ input }) => {
+      await app.do(
+        "TrackCartActivity",
+        { stream: input.sessionId, actor: { id: "anonymous", name: "Browser" } },
+        { action: input.action, productId: input.productId, quantity: input.quantity }
+      );
+      return { success: true };
+    }),
+
   // Queries
+  getCartActivity: t.procedure.query(async () => {
+    return getCartActivities();
+  }),
+
   getPrice: t.procedure.input(z.string()).query(async ({ input }) => {
     const snap = await app.load(Price, input);
     return snap.state;

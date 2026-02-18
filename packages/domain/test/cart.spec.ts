@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { store, type Target } from "@rotorsoft/act";
-import { app, Cart, Inventory, getOrders, clearOrders, getInventoryItems, clearInventory } from "../src/index.js";
+import { app, Cart, CartTracking, Inventory, getOrders, clearOrders, getInventoryItems, clearInventory, getCartActivities, clearCartActivities } from "../src/index.js";
 
 const target = (stream = crypto.randomUUID()): Target => ({
   stream,
@@ -292,5 +292,69 @@ describe("Orders projection", () => {
     const o2 = orders.find((o) => o.id === t2.stream);
     expect(o1!.totalPrice).toBe(10.0);
     expect(o2!.totalPrice).toBe(20.0);
+  });
+});
+
+describe("Cart tracking", () => {
+  beforeEach(async () => {
+    await store().seed();
+    clearOrders();
+    clearInventory();
+    clearCartActivities();
+  });
+
+  it("should emit CartActivityTracked on TrackCartActivity", async () => {
+    const session = target("session-1");
+    await app.do("TrackCartActivity", session, {
+      action: "add",
+      productId: "prod-espresso",
+      quantity: 1,
+    });
+    const snap = await app.load(CartTracking, session.stream);
+    expect(snap.state.eventCount).toBe(1);
+  });
+
+  it("should increment eventCount for multiple activities", async () => {
+    const session = target("session-2");
+    await app.do("TrackCartActivity", session, { action: "add", productId: "prod-espresso", quantity: 1 });
+    await app.do("TrackCartActivity", session, { action: "add", productId: "prod-grinder", quantity: 1 });
+    await app.do("TrackCartActivity", session, { action: "remove", productId: "prod-espresso", quantity: 1 });
+    const snap = await app.load(CartTracking, session.stream);
+    expect(snap.state.eventCount).toBe(3);
+  });
+
+  it("should materialize activity entries in projection", async () => {
+    const session = target("session-3");
+    await app.do("TrackCartActivity", session, { action: "add", productId: "prod-espresso", quantity: 1 });
+    await app.do("TrackCartActivity", session, { action: "remove", productId: "prod-espresso", quantity: 1 });
+    await drainAll();
+
+    const activities = getCartActivities();
+    const sessionActivities = activities.filter((a) => a.sessionId === "session-3");
+    expect(sessionActivities).toHaveLength(2);
+    expect(sessionActivities[0].action).toBe("add");
+    expect(sessionActivities[1].action).toBe("remove");
+    expect(sessionActivities[0].productId).toBe("prod-espresso");
+  });
+
+  it("should not interfere with order flow", async () => {
+    // Track some activity
+    const session = target("session-4");
+    await app.do("TrackCartActivity", session, { action: "add", productId: "prod-espresso", quantity: 1 });
+
+    // Place an order on a separate stream
+    const cart = target();
+    await app.do("PlaceOrder", cart, { items: [sampleItem({ price: "10.00" })] });
+    await drainAll();
+
+    // Order should work normally
+    const orders = getOrders();
+    const order = orders.find((o) => o.id === cart.stream);
+    expect(order).toBeDefined();
+    expect(order!.status).toBe("Published");
+
+    // Tracking should be on its own stream
+    const snap = await app.load(CartTracking, session.stream);
+    expect(snap.state.eventCount).toBe(1);
   });
 });

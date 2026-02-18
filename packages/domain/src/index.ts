@@ -6,4 +6,6 @@ export { Inventory, InventoryProjection, getInventoryItems, clearInventory } fro
 export type { InventoryItem } from "./inventory.js";
 export { OrdersProjection, getOrders, clearOrders } from "./orders.js";
 export type { OrderSummary } from "./orders.js";
+export { CartTracking, CartTrackingProjection, getCartActivities, clearCartActivities } from "./tracking.js";
+export type { CartActivity } from "./tracking.js";
 export { app } from "./bootstrap.js";

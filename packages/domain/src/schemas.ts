@@ -98,3 +98,22 @@ export const InventoryState = z.object({
   quantity: z.number(),
   productId: z.string(),
 });
+
+// === Cart Tracking Actions ===
+export const TrackCartActivity = z.object({
+  action: z.enum(["add", "remove", "clear"]),
+  productId: z.string(),
+  quantity: z.number(),
+});
+
+// === Cart Tracking Events ===
+export const CartActivityTracked = z.object({
+  action: z.enum(["add", "remove", "clear"]),
+  productId: z.string(),
+  quantity: z.number(),
+});
+
+// === Cart Tracking State ===
+export const CartTrackingState = z.object({
+  eventCount: z.number(),
+});
