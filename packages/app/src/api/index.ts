@@ -1,4 +1,4 @@
-import { Cart, Price, Inventory, getOrders, app } from "@rotorsoft/es-course-domain";
+import { Cart, Price, getOrders, getInventoryItems, app } from "@rotorsoft/es-course-domain";
 import type { Target } from "@rotorsoft/act";
 import { EventEmitter } from "node:events";
 import { initTRPC } from "@trpc/server";
@@ -40,10 +40,29 @@ function serializeEvents(events: Array<{ id: number; name: unknown; data: unknow
   }));
 }
 
-// Auto-drain on every commit (processes reactions and projections)
-app.on("committed", () => {
-  app.correlate({ after: -1, limit: 100 }).then(() => app.drain()).catch(console.error);
-});
+// Event-driven drain: each commit enqueues exactly one correlate+drain.
+// Reactions that commit new events trigger further drains via committed.
+let drainChain = Promise.resolve();
+
+function enqueueDrain() {
+  drainChain = drainChain.then(async () => {
+    const { leased } = await app.correlate({ after: -1, limit: 100 });
+    if (leased.length > 0) await app.drain();
+  }).catch(console.error) as Promise<void>;
+}
+
+// Kick off a drain and wait for the chain to settle (no more pending work)
+async function drainSettled() {
+  enqueueDrain();
+  let prev;
+  do {
+    prev = drainChain;
+    await drainChain;
+  } while (drainChain !== prev);
+}
+
+// Reactions that commit new events during drain trigger further drains
+app.on("committed", () => { enqueueDrain(); });
 
 // Local event bus for SSE subscriptions (decoupled from app's own listeners)
 const eventBus = new EventEmitter();
@@ -68,6 +87,7 @@ export const router = t.router({
       const target = userTarget(stream);
       const itemId = data.itemId ?? crypto.randomUUID();
       await app.do("AddItem", target, { ...data, itemId });
+      await drainSettled();
       return { success: true, cartId: target.stream, itemId };
     }),
 
@@ -82,6 +102,7 @@ export const router = t.router({
     .mutation(async ({ input }) => {
       const { stream, ...data } = input;
       await app.do("RemoveItem", userTarget(stream), data);
+      await drainSettled();
       return { success: true };
     }),
 
@@ -89,6 +110,7 @@ export const router = t.router({
     .input(z.object({ stream: z.string() }))
     .mutation(async ({ input }) => {
       await app.do("ClearCart", userTarget(input.stream), {});
+      await drainSettled();
       return { success: true };
     }),
 
@@ -96,9 +118,7 @@ export const router = t.router({
     .input(z.object({ stream: z.string() }))
     .mutation(async ({ input }) => {
       await app.do("SubmitCart", userTarget(input.stream), {});
-      // Process reactions synchronously so CartPublished is committed before response
-      await app.correlate({ after: -1, limit: 100 });
-      await app.drain();
+      await drainSettled();
       return { success: true };
     }),
 
@@ -116,15 +136,18 @@ export const router = t.router({
         { stream: input.productId, actor: { id: "system", name: "System" } },
         input
       );
+      await drainSettled();
       return { success: true };
     }),
 
-  // Inventory commands
+  // Inventory commands (ImportInventory for seeding, AdjustInventory for admin)
   ImportInventory: t.procedure
     .input(
       z.object({
         productId: z.string(),
-        inventory: z.number(),
+        name: z.string(),
+        price: z.number(),
+        quantity: z.number(),
       })
     )
     .mutation(async ({ input }) => {
@@ -133,6 +156,40 @@ export const router = t.router({
         { stream: input.productId, actor: { id: "system", name: "System" } },
         input
       );
+      await drainSettled();
+      return { success: true };
+    }),
+
+  AdjustInventory: t.procedure
+    .input(
+      z.object({
+        productId: z.string(),
+        quantity: z.number(),
+      })
+    )
+    .mutation(async ({ input }) => {
+      await app.do(
+        "AdjustInventory",
+        { stream: input.productId, actor: { id: "system", name: "System" } },
+        input
+      );
+      await drainSettled();
+      return { success: true };
+    }),
+
+  DecommissionInventory: t.procedure
+    .input(
+      z.object({
+        productId: z.string(),
+      })
+    )
+    .mutation(async ({ input }) => {
+      await app.do(
+        "DecommissionInventory",
+        { stream: input.productId, actor: { id: "system", name: "System" } },
+        input
+      );
+      await drainSettled();
       return { success: true };
     }),
 
@@ -147,26 +204,21 @@ export const router = t.router({
     return snap.state;
   }),
 
-  getInventory: t.procedure.input(z.string()).query(async ({ input }) => {
-    const snap = await app.load(Inventory, input);
-    return snap.state;
+  getInventory: t.procedure.query(async () => {
+    return getInventoryItems();
   }),
 
   getProducts: t.procedure.query(async () => {
+    const items = getInventoryItems();
     const ids = ["prod-espresso", "prod-grinder", "prod-kettle", "prod-scale", "prod-filters"];
-    return Promise.all(
-      ids.map(async (id) => {
-        const [priceSnap, invSnap] = await Promise.all([
-          app.load(Price, id),
-          app.load(Inventory, id),
-        ]);
-        return {
-          productId: id,
-          price: priceSnap.state.price,
-          inventory: invSnap.state.inventory,
-        };
-      })
-    );
+    return ids.map((id) => {
+      const inv = items[id];
+      return {
+        productId: id,
+        price: inv?.price ?? 0,
+        inventory: inv?.quantity ?? 0,
+      };
+    });
   }),
 
   listOrders: t.procedure.query(async () => {

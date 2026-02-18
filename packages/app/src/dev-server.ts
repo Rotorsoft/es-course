@@ -19,7 +19,7 @@ async function seed() {
 
   for (const p of products) {
     await app.do("ChangePrice", { stream: p.productId, actor: system }, { productId: p.productId, price: parseFloat(p.price) });
-    await app.do("ImportInventory", { stream: p.productId, actor: system }, { productId: p.productId, inventory: p.inventory });
+    await app.do("ImportInventory", { stream: p.productId, actor: system }, { productId: p.productId, name: p.name, price: parseFloat(p.price), quantity: p.inventory });
   }
 
   // --- Cart 1: has 2 items, still open ---

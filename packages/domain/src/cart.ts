@@ -1,6 +1,5 @@
 import { state } from "@rotorsoft/act";
 import {
-  mustNotExceedMaxItems,
   mustHaveItems,
   mustBeOpen,
 } from "./invariants.js";
@@ -64,7 +63,7 @@ export const Cart = state({ Cart: CartState })
     }),
   })
   .on({ AddItem })
-  .given([mustNotExceedMaxItems, mustBeOpen])
+  .given([mustBeOpen])
   .emit((data) => ["ItemAdded", data])
   .on({ RemoveItem })
   .given([mustHaveItems, mustBeOpen])

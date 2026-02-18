@@ -107,18 +107,42 @@ export const PriceState = z.object({
 
 // === Inventory Actions ===
 export const ImportInventory = z.object({
-  inventory: z.number(),
+  name: z.string(),
+  price: z.number(),
+  quantity: z.number(),
   productId: z.string(),
 });
 
 // === Inventory Events ===
-export const InventoryUpdated = z.object({
-  inventory: z.number(),
+export const InventoryImported = z.object({
+  name: z.string(),
+  price: z.number(),
+  quantity: z.number(),
+  productId: z.string(),
+});
+
+export const AdjustInventory = z.object({
+  quantity: z.number(),
+  productId: z.string(),
+});
+
+export const InventoryAdjusted = z.object({
+  quantity: z.number(),
+  productId: z.string(),
+});
+
+export const DecommissionInventory = z.object({
+  productId: z.string(),
+});
+
+export const InventoryDecommissioned = z.object({
   productId: z.string(),
 });
 
 // === Inventory State ===
 export const InventoryState = z.object({
-  inventory: z.number(),
+  name: z.string(),
+  price: z.number(),
+  quantity: z.number(),
   productId: z.string(),
 });

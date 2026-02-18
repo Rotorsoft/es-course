@@ -1,7 +1,7 @@
 import { act, slice } from "@rotorsoft/act";
 import { Cart } from "./cart.js";
 import { Price } from "./price.js";
-import { Inventory } from "./inventory.js";
+import { Inventory, InventoryProjection } from "./inventory.js";
 import { OrdersProjection } from "./orders.js";
 
 const CartSlice = slice().with(Cart).build();
@@ -13,6 +13,7 @@ export const app = act()
   .with(PriceSlice)
   .with(InventorySlice)
   .with(OrdersProjection)
+  .with(InventoryProjection)
   // When a cart is submitted, publish it
   .on("CartSubmitted")
   .do(async function publishCart(event, stream, app) {

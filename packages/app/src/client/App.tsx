@@ -76,7 +76,9 @@ const EVENT_COLORS: Record<string, { bg: string; fg: string; label: string }> = 
   ItemArchiveRequested: { bg: "#fff8e1", fg: "#f9a825", label: "ItemArchiveRequested" },
   ItemArchived:         { bg: "#efebe9", fg: "#4e342e", label: "ItemArchived" },
   PriceChanged:         { bg: "#e0f7fa", fg: "#00838f", label: "PriceChanged" },
-  InventoryUpdated:     { bg: "#f1f8e9", fg: "#558b2f", label: "InventoryUpdated" },
+  InventoryImported:    { bg: "#f1f8e9", fg: "#558b2f", label: "InventoryImported" },
+  InventoryAdjusted:    { bg: "#dcedc8", fg: "#33691e", label: "InventoryAdjusted" },
+  InventoryDecommissioned: { bg: "#ffcdd2", fg: "#b71c1c", label: "InventoryDecommissioned" },
 };
 
 const DEFAULT_EVENT_COLOR = { bg: "#f5f5f5", fg: "#616161", label: "EVENT" };
@@ -398,6 +400,47 @@ body {
   font-family: var(--sans);
 }
 .cart-item-remove:hover { color: var(--danger); text-decoration: underline; }
+
+.cart-qty {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  margin-bottom: 6px;
+}
+.cart-qty-btn {
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--border);
+  background: #f7f7f7;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--sans);
+  color: var(--text-primary);
+  transition: background 0.1s;
+}
+.cart-qty-btn:first-child { border-radius: 4px 0 0 4px; }
+.cart-qty-btn:last-child { border-radius: 0 4px 4px 0; }
+.cart-qty-btn:hover { background: #eee; }
+.cart-qty-btn:disabled { opacity: 0.3; cursor: default; }
+.cart-qty-val {
+  width: 36px;
+  height: 28px;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  border-left: none;
+  border-right: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--mono);
+  font-size: 14px;
+  font-weight: 600;
+  background: #fff;
+}
 
 .drawer-footer {
   border-top: 1px solid var(--border);
@@ -994,12 +1037,14 @@ function EventPanel({
 
 // ── Cart Drawer ──────────────────────────────────────────────────────
 function CartDrawer({
-  open, onClose, cartId, onNewCart,
+  open, onClose, cartId, onNewCart, onAddProduct, liveStock,
 }: {
   open: boolean;
   onClose: () => void;
   cartId: string;
   onNewCart: () => void;
+  onAddProduct: (product: (typeof PRODUCTS)[number]) => void;
+  liveStock: Record<string, number>;
 }) {
   const utils = trpc.useUtils();
   const cart = trpc.getCart.useQuery(cartId, { enabled: !!cartId });
@@ -1011,6 +1056,8 @@ function CartDrawer({
   const submitCart = trpc.SubmitCart.useMutation({
     onSuccess: () => {
       invalidateCart();
+      utils.getProducts.invalidate();
+      utils.listOrders.invalidate();
       onNewCart();
       onClose();
     },
@@ -1025,6 +1072,12 @@ function CartDrawer({
     .toFixed(2);
 
   const productMap = Object.fromEntries(PRODUCTS.map((p) => [p.productId, p]));
+
+  // Group items by productId
+  const grouped = items.reduce<Record<string, typeof items>>((acc, item) => {
+    (acc[item.productId] ??= []).push(item);
+    return acc;
+  }, {});
 
   return (
     <>
@@ -1050,30 +1103,44 @@ function CartDrawer({
               <p>Your cart is empty</p>
             </div>
           ) : (
-            items.map((item) => {
-              const prod = productMap[item.productId];
+            Object.entries(grouped).map(([productId, productItems]) => {
+              const prod = productMap[productId];
+              const first = productItems[0];
+              const qty = productItems.length;
+              const lineTotal = (qty * parseFloat(first.price || "0")).toFixed(2);
               return (
-                <div key={item.itemId} className="cart-item">
+                <div key={productId} className="cart-item">
                   <div className="cart-item-img" style={{ background: prod?.gradient ?? "#eee" }}>
                     {prod?.icon ?? "📦"}
                   </div>
                   <div className="cart-item-info">
-                    <div className="cart-item-name">{item.name}</div>
+                    <div className="cart-item-name">{first.name}</div>
                     <div className="cart-item-desc">{prod?.description ?? ""}</div>
-                    <div className="cart-item-price">${item.price}</div>
+                    <div className="cart-item-price">${lineTotal}</div>
                     {status === "Open" && (
-                      <button
-                        className="cart-item-remove"
-                        onClick={() =>
-                          removeItem.mutate({
-                            stream: cartId,
-                            itemId: item.itemId,
-                            productId: item.productId,
-                          })
-                        }
-                      >
-                        Delete
-                      </button>
+                      <div className="cart-qty">
+                        <button
+                          className="cart-qty-btn"
+                          disabled={removeItem.isPending}
+                          onClick={() =>
+                            removeItem.mutate({
+                              stream: cartId,
+                              itemId: productItems[qty - 1].itemId,
+                              productId,
+                            })
+                          }
+                        >
+                          {qty === 1 ? "🗑" : "−"}
+                        </button>
+                        <div className="cart-qty-val">{qty}</div>
+                        <button
+                          className="cart-qty-btn"
+                          disabled={qty >= (liveStock[productId] ?? 0)}
+                          onClick={() => prod && onAddProduct(prod)}
+                        >
+                          +
+                        </button>
+                      </div>
                     )}
                   </div>
                 </div>
@@ -1187,7 +1254,10 @@ function AdminView() {
   const changePrice = trpc.ChangePrice.useMutation({
     onSuccess: () => utils.getProducts.invalidate(),
   });
-  const importInventory = trpc.ImportInventory.useMutation({
+  const adjustInventory = trpc.AdjustInventory.useMutation({
+    onSuccess: () => utils.getProducts.invalidate(),
+  });
+  const decommission = trpc.DecommissionInventory.useMutation({
     onSuccess: () => utils.getProducts.invalidate(),
   });
 
@@ -1288,19 +1358,30 @@ function AdminView() {
                         }
                       />
                     </td>
-                    <td>
+                    <td style={{ display: "flex", gap: "8px" }}>
                       <button
                         className="admin-update-btn"
-                        disabled={!invInputs[p.productId] || importInventory.isPending}
+                        disabled={!invInputs[p.productId] || adjustInventory.isPending}
                         onClick={() => {
                           const val = parseInt(invInputs[p.productId], 10);
                           if (!isNaN(val) && val >= 0) {
-                            importInventory.mutate({ productId: p.productId, inventory: val });
+                            adjustInventory.mutate({
+                              productId: p.productId,
+                              quantity: val,
+                            });
                             setInvInputs((prev) => ({ ...prev, [p.productId]: "" }));
                           }
                         }}
                       >
                         Update
+                      </button>
+                      <button
+                        className="admin-update-btn"
+                        style={{ background: "#fff", borderColor: "var(--danger)", color: "var(--danger)" }}
+                        disabled={decommission.isPending}
+                        onClick={() => decommission.mutate({ productId: p.productId })}
+                      >
+                        Decommission
                       </button>
                     </td>
                   </tr>
@@ -1356,11 +1437,12 @@ function CartApp() {
       }
 
       // Reactive invalidation for other views
-      if (evt.name === "PriceChanged" || evt.name === "InventoryUpdated") {
+      if (evt.name === "PriceChanged" || evt.name === "InventoryImported" || evt.name === "InventoryAdjusted" || evt.name === "InventoryDecommissioned") {
         utils.getProducts.invalidate();
       }
       if (evt.name === "CartSubmitted" || evt.name === "CartPublished") {
         utils.listOrders.invalidate();
+        utils.getProducts.invalidate(); // inventory decrements on CartPublished
       }
     },
     [cartId, utils]
@@ -1383,8 +1465,8 @@ function CartApp() {
     onError: (err) => {
       setAddingProduct(null);
       setToast(
-        err.message.includes("more than 3")
-          ? "Cart is full (max 3 items)"
+        err.message.includes("invariant")
+          ? "Could not add item — check stock availability"
           : "Could not add item"
       );
       setTimeout(() => setToast(null), 3000);
@@ -1484,6 +1566,8 @@ function CartApp() {
         onClose={() => setDrawerOpen(false)}
         cartId={cartId}
         onNewCart={() => setCartId("")}
+        onAddProduct={handleAdd}
+        liveStock={Object.fromEntries(liveProducts.map((p) => [p.productId, p.inventory]))}
       />
 
       <Toast message={toast} />

@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { store, type Target } from "@rotorsoft/act";
-import { app, Cart, Inventory, getOrders, clearOrders } from "../src/index.js";
+import { app, Cart, Inventory, getOrders, clearOrders, getInventoryItems, clearInventory } from "../src/index.js";
 
 const target = (stream = crypto.randomUUID()): Target => ({
   stream,
@@ -27,6 +27,7 @@ describe("Cart", () => {
   beforeEach(async () => {
     await store().seed();
     clearOrders();
+    clearInventory();
   });
 
   describe("spec: Add Item", () => {
@@ -39,14 +40,13 @@ describe("Cart", () => {
       expect(snap.state.items[0].name).toBe("Widget");
     });
 
-    it("should reject adding a 4th item (max 3)", async () => {
+    it("should allow adding many items (no hardcoded cap)", async () => {
       const t = target();
-      await app.do("AddItem", t, sampleItem({ itemId: "i1" }));
-      await app.do("AddItem", t, sampleItem({ itemId: "i2" }));
-      await app.do("AddItem", t, sampleItem({ itemId: "i3" }));
-      await expect(
-        app.do("AddItem", t, sampleItem({ itemId: "i4" }))
-      ).rejects.toThrow();
+      for (let i = 1; i <= 15; i++) {
+        await app.do("AddItem", t, sampleItem({ itemId: `i${i}` }));
+      }
+      const snap = await app.load(Cart, t.stream);
+      expect(snap.state.items).toHaveLength(15);
     });
   });
 
@@ -138,16 +138,165 @@ describe("Inventory", () => {
   beforeEach(async () => {
     await store().seed();
     clearOrders();
+    clearInventory();
   });
 
   it("should import inventory", async () => {
     const t = target("prod-1");
     await app.do("ImportInventory", t, {
-      inventory: 100,
+      name: "Widget",
+      price: 9.99,
+      quantity: 100,
       productId: "prod-1",
     });
     const snap = await app.load(Inventory, t.stream);
-    expect(snap.state.inventory).toBe(100);
+    expect(snap.state.quantity).toBe(100);
+    expect(snap.state.name).toBe("Widget");
+    expect(snap.state.price).toBe(9.99);
+  });
+});
+
+describe("Inventory projection", () => {
+  beforeEach(async () => {
+    await store().seed();
+    clearOrders();
+    clearInventory();
+  });
+
+  it("should materialize from InventoryImported events", async () => {
+    const system = { stream: "prod-1", actor: { id: "system", name: "System" } };
+    await app.do("ImportInventory", system, {
+      name: "Widget",
+      price: 9.99,
+      quantity: 50,
+      productId: "prod-1",
+    });
+    await drainAll();
+
+    const items = getInventoryItems();
+    expect(items["prod-1"]).toBeDefined();
+    expect(items["prod-1"].name).toBe("Widget");
+    expect(items["prod-1"].price).toBe(9.99);
+    expect(items["prod-1"].quantity).toBe(50);
+  });
+
+  it("should track multiple products", async () => {
+    const sys = (id: string) => ({ stream: id, actor: { id: "system", name: "System" } });
+    await app.do("ImportInventory", sys("prod-1"), { name: "Widget", price: 9.99, quantity: 50, productId: "prod-1" });
+    await app.do("ImportInventory", sys("prod-2"), { name: "Gadget", price: 19.99, quantity: 30, productId: "prod-2" });
+    await drainAll();
+
+    const items = getInventoryItems();
+    expect(Object.keys(items)).toHaveLength(2);
+    expect(items["prod-1"].quantity).toBe(50);
+    expect(items["prod-2"].quantity).toBe(30);
+  });
+
+  it("should decrement stock on CartPublished", async () => {
+    const sys = (id: string) => ({ stream: id, actor: { id: "system", name: "System" } });
+    await app.do("ImportInventory", sys("prod-1"), { name: "Widget", price: 9.99, quantity: 10, productId: "prod-1" });
+    await drainAll();
+
+    // Create and submit a cart with the product
+    const cart = target();
+    await app.do("AddItem", cart, sampleItem({ itemId: "i1", productId: "prod-1", price: "9.99" }));
+    await app.do("SubmitCart", cart, {});
+    await drainAll();
+
+    const items = getInventoryItems();
+    expect(items["prod-1"].quantity).toBe(9);
+  });
+
+  it("should decrement multiple items of same product in one cart", async () => {
+    const sys = (id: string) => ({ stream: id, actor: { id: "system", name: "System" } });
+    await app.do("ImportInventory", sys("prod-1"), { name: "Widget", price: 9.99, quantity: 10, productId: "prod-1" });
+    await drainAll();
+
+    const cart = target();
+    await app.do("AddItem", cart, sampleItem({ itemId: "i1", productId: "prod-1", price: "9.99" }));
+    await app.do("AddItem", cart, sampleItem({ itemId: "i2", productId: "prod-1", price: "9.99" }));
+    await app.do("SubmitCart", cart, {});
+    await drainAll();
+
+    const items = getInventoryItems();
+    expect(items["prod-1"].quantity).toBe(8);
+  });
+
+  it("should not go below zero", async () => {
+    const sys = (id: string) => ({ stream: id, actor: { id: "system", name: "System" } });
+    await app.do("ImportInventory", sys("prod-1"), { name: "Widget", price: 9.99, quantity: 1, productId: "prod-1" });
+    await drainAll();
+
+    const cart = target();
+    await app.do("AddItem", cart, sampleItem({ itemId: "i1", productId: "prod-1", price: "9.99" }));
+    await app.do("AddItem", cart, sampleItem({ itemId: "i2", productId: "prod-1", price: "9.99" }));
+    await app.do("SubmitCart", cart, {});
+    await drainAll();
+
+    const items = getInventoryItems();
+    expect(items["prod-1"].quantity).toBe(0);
+  });
+
+  it("should update price on PriceChanged", async () => {
+    const sys = (id: string) => ({ stream: id, actor: { id: "system", name: "System" } });
+    await app.do("ImportInventory", sys("prod-1"), { name: "Widget", price: 9.99, quantity: 10, productId: "prod-1" });
+    await app.do("ChangePrice", sys("prod-1"), { price: 14.99, productId: "prod-1" });
+    await drainAll();
+
+    const items = getInventoryItems();
+    expect(items["prod-1"].price).toBe(14.99);
+  });
+
+  it("should update quantity on AdjustInventory (admin update)", async () => {
+    const sys = (id: string) => ({ stream: id, actor: { id: "system", name: "System" } });
+    await app.do("ImportInventory", sys("prod-1"), { name: "Widget", price: 9.99, quantity: 10, productId: "prod-1" });
+    await drainAll();
+
+    // Admin adjusts stock to 50
+    await app.do("AdjustInventory", sys("prod-1"), { quantity: 50, productId: "prod-1" });
+    await drainAll();
+
+    const items = getInventoryItems();
+    expect(items["prod-1"].quantity).toBe(50);
+    // Name and price should be preserved
+    expect(items["prod-1"].name).toBe("Widget");
+    expect(items["prod-1"].price).toBe(9.99);
+  });
+
+  it("should remove item on DecommissionInventory", async () => {
+    const sys = (id: string) => ({ stream: id, actor: { id: "system", name: "System" } });
+    await app.do("ImportInventory", sys("prod-1"), { name: "Widget", price: 9.99, quantity: 10, productId: "prod-1" });
+    await app.do("ImportInventory", sys("prod-2"), { name: "Gadget", price: 19.99, quantity: 5, productId: "prod-2" });
+    await drainAll();
+
+    expect(Object.keys(getInventoryItems())).toHaveLength(2);
+
+    await app.do("DecommissionInventory", sys("prod-1"), { productId: "prod-1" });
+    await drainAll();
+
+    const items = getInventoryItems();
+    expect(items["prod-1"]).toBeUndefined();
+    expect(items["prod-2"]).toBeDefined();
+    expect(items["prod-2"].quantity).toBe(5);
+  });
+
+  it("should allow re-importing a decommissioned item", async () => {
+    const sys = (id: string) => ({ stream: id, actor: { id: "system", name: "System" } });
+    await app.do("ImportInventory", sys("prod-1"), { name: "Widget", price: 9.99, quantity: 10, productId: "prod-1" });
+    await drainAll();
+
+    await app.do("DecommissionInventory", sys("prod-1"), { productId: "prod-1" });
+    await drainAll();
+    expect(getInventoryItems()["prod-1"]).toBeUndefined();
+
+    // Re-import brings it back
+    await app.do("ImportInventory", sys("prod-1"), { name: "Widget v2", price: 12.99, quantity: 20, productId: "prod-1" });
+    await drainAll();
+
+    const items = getInventoryItems();
+    expect(items["prod-1"]).toBeDefined();
+    expect(items["prod-1"].name).toBe("Widget v2");
+    expect(items["prod-1"].quantity).toBe(20);
   });
 });
 
@@ -155,6 +304,7 @@ describe("Orders projection", () => {
   beforeEach(async () => {
     await store().seed();
     clearOrders();
+    clearInventory();
   });
 
   it("should materialize order from cart events", async () => {
