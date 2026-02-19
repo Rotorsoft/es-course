@@ -1,0 +1,28 @@
+@import url('https://fonts.googleapis.com/css2?family=Libre+Baskerville:wght@400;700&family=Work+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+:root {
+  --header-bg: #131921;
+  --header-accent: #f0c14b;
+  --accent: #ff9900;
+  --bg: #eaeded;
+  --card-bg: #ffffff;
+  --text-primary: #0f1111;
+  --text-secondary: #565959;
+  --text-link: #007185;
+  --border: #d5d9d9;
+  --success: #067d62;
+  --danger: #b12704;
+  --serif: 'Libre Baskerville', Georgia, serif;
+  --sans: 'Work Sans', system-ui, sans-serif;
+  --mono: 'JetBrains Mono', 'Fira Code', monospace;
+  --event-panel-w: 380px;
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: var(--sans);
+  background: var(--bg);
+  color: var(--text-primary);
+  -webkit-font-smoothing: antialiased;
+}
