@@ -32,18 +32,18 @@ pnpm build        # Build all packages
 packages/
   domain/src/
     schemas.ts        Zod schemas — actions, events, state
-    cart.ts           Cart aggregate (PlaceOrder, PublishCart)
-    inventory.ts      Inventory aggregate + projection
-    tracking.ts       CartTracking aggregate + projection
+    cart.ts           Cart aggregate + CartSlice (reaction: auto-publish)
+    inventory.ts      Inventory aggregate + projection + InventorySlice
+    tracking.ts       CartTracking aggregate + projection + CartTrackingSlice
     orders.ts         Orders projection (read model)
-    invariants.ts     Business rules (must be open, etc.)
-    bootstrap.ts      Composes all slices into the app
+    invariants.ts     Business rules (must be open)
+    bootstrap.ts      Composes slices into the app
     index.ts          Public exports
   domain/test/
-    cart.spec.ts      21 tests covering all slices
+    cart.spec.ts      20 tests covering all slices
   app/src/
     api/index.ts      tRPC router (mutations, queries, SSE)
-    client/App.tsx    Single-file React app (4 views)
+    client/App.tsx    Single-file React app (5 views)
     dev-server.ts     Dev server with seed data
 ```
 
@@ -58,18 +58,18 @@ The monorepo has two packages:
 
 ## Domain Slices
 
-The domain is built from four independent **slices**, each owning its own aggregate, events, and state. Slices are composed together in `bootstrap.ts`.
+The domain is built from three independent **slices**, each owning its own aggregate, events, state, and projections. Each slice is self-contained in its own file and composed in `bootstrap.ts`.
 
-### Cart Slice
+### Cart Slice (`cart.ts`)
 
-The order lifecycle aggregate. A cart starts `Open`, accepts a `PlaceOrder` command (which validates invariants), emits `CartSubmitted`, then a **reaction** automatically fires `PublishCart` to emit `CartPublished`.
+The order lifecycle aggregate. A cart starts `Open`, accepts a `PlaceOrder` command (which validates invariants), emits `CartSubmitted`, then a **reaction** defined within the slice automatically fires `PublishCart` to emit `CartPublished`. The Orders projection is also bundled into this slice.
 
 ```
 PlaceOrder ──► CartSubmitted ──► (reaction) ──► PublishCart ──► CartPublished
 ```
 
 ```ts
-// cart.ts
+// cart.ts — aggregate
 export const Cart = state({ Cart: CartState })
   .init(() => ({ status: "Open", totalPrice: 0 }))
   .emits({ CartSubmitted, CartPublished })
@@ -97,9 +97,25 @@ export const Cart = state({ Cart: CartState })
   .on({ PublishCart })
   .emit((data) => ["CartPublished", data])
   .build();
+
+// cart.ts — slice with reaction + Orders projection
+export const CartSlice = slice()
+  .withState(Cart)
+  .withProjection(OrdersProjection)
+  .on("CartSubmitted")
+  .do(async function publishCart(event, stream, app) {
+    await app.do(
+      "PublishCart",
+      { stream, actor: { id: "system", name: "CartPublisher" } },
+      { orderedProducts: event.data.orderedProducts, totalPrice: event.data.totalPrice },
+      event
+    );
+  })
+  .to((event) => ({ target: event.stream }))
+  .build();
 ```
 
-### Inventory Slice
+### Inventory Slice (`inventory.ts`)
 
 Per-product inventory tracking with import, adjust, and decommission lifecycle. Includes a **projection** that maintains a live read model of stock levels, and also reacts to `CartPublished` events from other slices.
 
@@ -116,6 +132,14 @@ export const InventoryProjection = projection("inventory")
   .do(async (event) => {
     inventory.set(event.data.productId, { ... });
   })
+  .on({ InventoryAdjusted })
+  .do(async (event) => {
+    // Update price and quantity
+  })
+  .on({ InventoryDecommissioned })
+  .do(async (event) => {
+    inventory.delete(event.data.productId);
+  })
   .on({ CartPublished })
   .do(async (event) => {
     // Decrement stock for each ordered item
@@ -125,9 +149,16 @@ export const InventoryProjection = projection("inventory")
     }
   })
   .build();
+
+// inventory.ts — slice bundles Cart (for CartPublished), Inventory, and projection
+export const InventorySlice = slice()
+  .withState(Cart)
+  .withState(Inventory)
+  .withProjection(InventoryProjection)
+  .build();
 ```
 
-### CartTracking Slice
+### CartTracking Slice (`tracking.ts`)
 
 Append-only aggregate for marketing analytics. Captures browsing behavior (add/remove/clear) without affecting the order flow. Fire-and-forget from the client — no drain needed, no invariants, no error handling that blocks the UI.
 
@@ -151,18 +182,10 @@ export const CartTracking = state({ CartTracking: CartTrackingState })
   .emit((data) => ["CartActivityTracked", data])
   .build();
 
-// tracking.ts — projection materializes activity log
-export const CartTrackingProjection = projection("cart-tracking")
-  .on({ CartActivityTracked })
-  .do(async (event) => {
-    activities.push({
-      sessionId: event.stream,
-      action: event.data.action,
-      productId: event.data.productId,
-      quantity: event.data.quantity,
-      timestamp: event.created.toISOString(),
-    });
-  })
+// tracking.ts — slice bundles aggregate + projection
+export const CartTrackingSlice = slice()
+  .withState(CartTracking)
+  .withProjection(CartTrackingProjection)
   .build();
 ```
 
@@ -170,36 +193,19 @@ export const CartTrackingProjection = projection("cart-tracking")
 
 ## Composition
 
-All slices are wired together in `bootstrap.ts`. Each aggregate is wrapped in a `slice()`, then projections and reactions are added to the app builder:
+Each slice is self-contained — aggregate, projection, and reactions are defined together in a single file. The `bootstrap.ts` file simply wires the slices into the app:
 
 ```ts
 // bootstrap.ts
-import { act, slice } from "@rotorsoft/act";
-
-const CartSlice        = slice().with(Cart).build();
-const PriceSlice       = slice().with(Price).build();
-const InventorySlice   = slice().with(Inventory).build();
-const CartTrackingSlice = slice().with(CartTracking).build();
+import { act } from "@rotorsoft/act";
+import { CartSlice } from "./cart.js";
+import { InventorySlice } from "./inventory.js";
+import { CartTrackingSlice } from "./tracking.js";
 
 export const app = act()
-  .with(CartSlice)
-  .with(PriceSlice)
-  .with(InventorySlice)
-  .with(CartTrackingSlice)
-  .with(OrdersProjection)
-  .with(InventoryProjection)
-  .with(CartTrackingProjection)
-  // Reaction: auto-publish after submission
-  .on("CartSubmitted")
-  .do(async function publishCart(event, stream, app) {
-    await app.do(
-      "PublishCart",
-      { stream, actor: { id: "system", name: "CartPublisher" } },
-      { orderedProducts: event.data.orderedProducts, totalPrice: event.data.totalPrice },
-      event
-    );
-  })
-  .to((event) => ({ target: event.stream }))
+  .withSlice(CartSlice)
+  .withSlice(InventorySlice)
+  .withSlice(CartTrackingSlice)
   .build();
 ```
 
@@ -209,29 +215,29 @@ export const app = act()
 ┌─────────────────────────────────────────────────────────┐
 │                      Event Store                        │
 │  (single append-only log, shared by all slices)         │
-└────────┬────────────┬──────────────┬───────────────┬────┘
-         │            │              │               │
-    CartSlice    PriceSlice   InventorySlice   CartTrackingSlice
-    ┌────────┐   ┌─────────┐  ┌────────────┐   ┌──────────────┐
-    │ Cart   │   │ Price   │  │ Inventory  │   │ CartTracking │
-    │ agg.   │   │ agg.    │  │ agg.       │   │ agg.         │
-    └───┬────┘   └────┬────┘  └─────┬──────┘   └──────┬───────┘
-        │             │             │                  │
-        ▼             │             ▼                  ▼
-   ┌─────────┐        │      ┌───────────┐    ┌───────────────┐
-   │ Orders  │◄───────┘      │ Inventory │    │ CartTracking  │
-   │ proj.   │               │ proj.     │    │ proj.         │
-   └─────────┘               └───────────┘    └───────────────┘
-        │                         │                  │
-        ▼                         ▼                  ▼
-   Orders View              Admin View         Marketing View
+└────────┬──────────────────┬───────────────────────┬─────┘
+         │                  │                       │
+    CartSlice         InventorySlice         CartTrackingSlice
+    ┌────────┐        ┌────────────┐         ┌──────────────┐
+    │ Cart   │        │ Inventory  │         │ CartTracking │
+    │ agg.   │        │ agg.       │         │ agg.         │
+    └───┬────┘        └─────┬──────┘         └──────┬───────┘
+        │                   │                       │
+        ▼                   ▼                       ▼
+   ┌─────────┐       ┌───────────┐          ┌───────────────┐
+   │ Orders  │       │ Inventory │          │ CartTracking  │
+   │ proj.   │       │ proj.     │          │ proj.         │
+   └─────────┘       └───────────┘          └───────────────┘
+        │                  │                       │
+        ▼                  ▼                       ▼
+   Orders View        Admin View            Marketing View
 ```
 
 ---
 
 ## UI Views
 
-The React client is a single-file app (`App.tsx`) with four tabs and a live event log panel.
+The React client is a single-file app (`App.tsx`) with five tabs and a live event log panel.
 
 ### Shop
 
@@ -308,6 +314,7 @@ The tRPC router exposes mutations for commands, queries for read models, and an 
 | Endpoint | Description |
 |----------|-------------|
 | `getProducts` | Live product list (prices + stock from Inventory projection) |
+| `getInventory` | Raw inventory map (all products) |
 | `listOrders` | All orders (from Orders projection) |
 | `getCartActivity` | Activity log (from CartTracking projection) |
 
@@ -321,7 +328,7 @@ The tRPC router exposes mutations for commands, queries for read models, and an 
 
 ## Testing
 
-21 tests cover all domain slices:
+20 tests cover all domain slices:
 
 ```sh
 pnpm test
@@ -341,19 +348,6 @@ Tests use `store().seed()` for isolation and `app.correlate()` + `app.drain()` t
 ```sh
 npx vitest run --coverage
 ```
-
-| File | Stmts | Branch | Funcs | Lines |
-|------|------:|-------:|------:|------:|
-| **All files** | **100%** | **66.6%** | **100%** | **100%** |
-| bootstrap.ts | 100% | 100% | 100% | 100% |
-| cart.ts | 100% | 50% | 100% | 100% |
-| invariants.ts | 100% | 100% | 100% | 100% |
-| inventory.ts | 100% | 75% | 100% | 100% |
-| orders.ts | 100% | 50% | 100% | 100% |
-| schemas.ts | 100% | 100% | 100% | 100% |
-| tracking.ts | 100% | 100% | 100% | 100% |
-
-> Branch coverage gaps are in defensive checks within projections (e.g. `if (existing)` guards that never fail in tests because events always arrive in order).
 
 ---
 
