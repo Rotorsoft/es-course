@@ -95,7 +95,7 @@ export const Cart = state({ Cart: CartState })
     },
   ])
   .on({ PublishCart })
-  .emit((data) => ["CartPublished", data])
+  .emit("CartPublished")
   .build();
 
 // cart.ts — slice with reaction + Orders projection
@@ -126,6 +126,18 @@ DecommissionInventory ──► InventoryDecommissioned
 ```
 
 ```ts
+// inventory.ts — aggregate uses shorthand emit + auto-patching from events
+export const Inventory = state({ Inventory: InventoryState })
+  .init(() => ({ name: "", price: 0, quantity: 0, productId: "" }))
+  .emits({ InventoryImported, InventoryAdjusted, InventoryDecommissioned })
+  .patch({
+    InventoryDecommissioned: () => ({ quantity: 0 }),
+  })
+  .on({ ImportInventory }).emit("InventoryImported")
+  .on({ AdjustInventory }).emit("InventoryAdjusted")
+  .on({ DecommissionInventory }).emit("InventoryDecommissioned")
+  .build();
+
 // inventory.ts — projection listens to events from multiple slices
 export const InventoryProjection = projection("inventory")
   .on({ InventoryImported })
@@ -178,8 +190,7 @@ export const CartTracking = state({ CartTracking: CartTrackingState })
       eventCount: state.eventCount + 1,
     }),
   })
-  .on({ TrackCartActivity })
-  .emit((data) => ["CartActivityTracked", data])
+  .on({ TrackCartActivity }).emit("CartActivityTracked")
   .build();
 
 // tracking.ts — slice bundles aggregate + projection

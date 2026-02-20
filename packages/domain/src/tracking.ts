@@ -14,8 +14,7 @@ export const CartTracking = state({ CartTracking: CartTrackingState })
       eventCount: state.eventCount + 1,
     }),
   })
-  .on({ TrackCartActivity })
-  .emit((data) => ["CartActivityTracked", data])
+  .on({ TrackCartActivity }).emit("CartActivityTracked")
   .build();
 
 // === Cart Tracking projection (read model) ===

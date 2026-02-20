@@ -39,9 +39,9 @@ Built on `@rotorsoft/act` — aggregates emit events that patch state, reactions
 
 ## @rotorsoft/act patterns
 
-**Patch handler**: `(event: Committed, state: Readonly<S>) => Partial<S>` — access payload via `event.data`, current state is 2nd arg.
+**Patch handler**: `(event: Committed, state: Readonly<S>) => Partial<S>` — access payload via `event.data`, current state is 2nd arg. Only needed when the event-to-state mapping is non-trivial; matching event fields auto-patch state.
 
-**Emit handler**: `(actionPayload, snapshot, target) => [EventName, data]`
+**Emit handler**: `(actionPayload, snapshot, target) => [EventName, data]` — or use shorthand `.emit("EventName")` when action payload matches event payload (pass-through)
 
 **Invariant shape**: `{ description: string; valid: (state, actor?) => boolean }`
 

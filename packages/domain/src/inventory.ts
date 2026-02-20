@@ -16,26 +16,11 @@ export const Inventory = state({ Inventory: InventoryState })
   .init(() => ({ name: "", price: 0, quantity: 0, productId: "" }))
   .emits({ InventoryImported, InventoryAdjusted, InventoryDecommissioned })
   .patch({
-    InventoryImported: ({ data }) => ({
-      name: data.name,
-      price: data.price,
-      quantity: data.quantity,
-      productId: data.productId,
-    }),
-    InventoryAdjusted: ({ data }) => ({
-      quantity: data.quantity,
-      price: data.price,
-    }),
-    InventoryDecommissioned: () => ({
-      quantity: 0,
-    }),
+    InventoryDecommissioned: () => ({ quantity: 0 }),
   })
-  .on({ ImportInventory })
-  .emit((data) => ["InventoryImported", data])
-  .on({ AdjustInventory })
-  .emit((data) => ["InventoryAdjusted", data])
-  .on({ DecommissionInventory })
-  .emit((data) => ["InventoryDecommissioned", data])
+  .on({ ImportInventory }).emit("InventoryImported")
+  .on({ AdjustInventory }).emit("InventoryAdjusted")
+  .on({ DecommissionInventory }).emit("InventoryDecommissioned")
   .build();
 
 // === Inventory projection (read model) ===

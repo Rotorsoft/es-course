@@ -35,7 +35,7 @@ export const Cart = state({ Cart: CartState })
     },
   ])
   .on({ PublishCart })
-  .emit((data) => ["CartPublished", data])
+  .emit("CartPublished")
   .build();
 
 export const CartSlice = slice()
@@ -51,4 +51,5 @@ export const CartSlice = slice()
       event
     );
   })
-  .to((event) => ({ target: event.stream })).build();
+  .to((event) => ({ target: event.stream }))
+  .build();
