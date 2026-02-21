@@ -7,6 +7,7 @@ import {
   CartSubmitted,
   PlaceOrder,
   PublishCart,
+  systemActor,
 } from "./schemas.js";
 
 export const Cart = state({ Cart: CartState })
@@ -46,7 +47,7 @@ export const CartSlice = slice()
   .do(async function publishCart(event, stream, app) {
     await app.do(
       "PublishCart",
-      { stream, actor: { id: "system", name: "CartPublisher" } },
+      { stream, actor: { ...systemActor, name: "CartPublisher" } },
       { orderedProducts: event.data.orderedProducts, totalPrice: event.data.totalPrice },
       event
     );

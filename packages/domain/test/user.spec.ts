@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { store, type Target } from "@rotorsoft/act";
-import { app, User, getUserByEmail, getUserByProviderId, getAllUsers, clearUsers } from "../src/index.js";
+import { store } from "@rotorsoft/act";
+import { app, User, getUserByEmail, getUserByProviderId, getAllUsers, clearUsers, systemActor } from "../src/index.js";
 
-const system: Target["actor"] = { id: "system", name: "System" };
+const system = systemActor;
 
 async function drainAll() {
   for (let i = 0; i < 10; i++) {

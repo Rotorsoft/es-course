@@ -1,4 +1,13 @@
+import type { Actor } from "@rotorsoft/act";
 import { z } from "zod";
+
+// === App Actor ===
+export type AppActor = Actor & {
+  picture?: string;
+  role: "admin" | "user" | "system";
+};
+
+export const systemActor: AppActor = { id: "system", name: "System", role: "system" };
 
 // === Shared ===
 export const CartItem = z.object({

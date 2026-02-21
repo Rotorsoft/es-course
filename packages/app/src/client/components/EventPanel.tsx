@@ -73,7 +73,7 @@ export function EventPanel({
                     className="event-badge"
                     style={{ background: color.bg, color: color.fg }}
                   >
-                    {color.label}
+                    {evt.name}
                   </span>
                   <span className="event-version">v{evt.version}</span>
                 </div>

@@ -1,13 +1,12 @@
 import { createHTTPServer } from "@trpc/server/adapters/standalone";
 import cors from "cors";
-import { app } from "@rotorsoft/es-course-domain";
-import type { Target } from "@rotorsoft/act";
+import { app, systemActor } from "@rotorsoft/es-course-domain";
 import { router, createContext } from "./api/index.js";
 import { hashPassword } from "./api/auth.js";
 
 // Seed data for UI development
 async function seed() {
-  const system: Target["actor"] = { id: "seed", name: "Seed Script" };
+  const system = { ...systemActor, name: "Seed Script" };
 
   // --- Inventory for 5 products ---
   const products = [

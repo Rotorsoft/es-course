@@ -1,6 +1,6 @@
-import type { Actor, Target } from "@rotorsoft/act";
 import {
   app,
+  type AppActor,
   getAllUsers,
   getCartActivities,
   getInventoryItems,
@@ -8,6 +8,7 @@ import {
   getOrdersByActor,
   getUserByEmail,
   getUserByProviderId,
+  systemActor,
   type UserProfile,
 } from "@rotorsoft/es-course-domain";
 import { initTRPC, tracked, TRPCError } from "@trpc/server";
@@ -19,7 +20,7 @@ import { hashPassword, signToken, verifyPassword, verifyToken } from "./auth.js"
 
 export type Context = {
   user: UserProfile | null;
-  actor: Readonly<Actor>;
+  actor: AppActor;
 };
 
 export function createContext({ req }: { req: { headers: Record<string, string | string[] | undefined> } }): Context {
@@ -33,7 +34,7 @@ export function createContext({ req }: { req: { headers: Record<string, string |
       if (user) {
         return {
           user,
-          actor: { id: user.email, name: user.name },
+          actor: { id: user.email, name: user.name, picture: user.picture, role: user.role },
         };
       }
     }
@@ -41,7 +42,7 @@ export function createContext({ req }: { req: { headers: Record<string, string |
 
   return {
     user: null,
-    actor: { id: "anonymous", name: "Anonymous" },
+    actor: { id: "anonymous", name: "Anonymous", role: "user" },
   };
 }
 
@@ -152,8 +153,7 @@ export const router = t.router({
         throw new TRPCError({ code: "CONFLICT", message: "User already exists" });
       }
       const passwordHash = hashPassword(input.password);
-      const system: Target["actor"] = { id: "system", name: "AuthSystem" };
-      await app.do("RegisterUser", { stream: input.username, actor: system }, {
+      await app.do("RegisterUser", { stream: input.username, actor: { ...systemActor, name: "AuthSystem" } }, {
         email: input.username,
         name: input.name,
         provider: "local",
@@ -186,8 +186,7 @@ export const router = t.router({
       // Register if new
       let user = getUserByEmail(payload.email);
       if (!user) {
-        const system: Target["actor"] = { id: "system", name: "AuthSystem" };
-        await app.do("RegisterUser", { stream: payload.email, actor: system }, {
+        await app.do("RegisterUser", { stream: payload.email, actor: { ...systemActor, name: "AuthSystem" } }, {
           email: payload.email,
           name: payload.name || payload.email,
           picture: payload.picture,
@@ -240,7 +239,7 @@ export const router = t.router({
       })
     )
     .mutation(async ({ input, ctx }) => {
-      const target: Target = {
+      const target = {
         stream: crypto.randomUUID(),
         actor: ctx.actor,
       };
@@ -316,7 +315,7 @@ export const router = t.router({
     .mutation(async ({ input }) => {
       await app.do(
         "TrackCartActivity",
-        { stream: input.sessionId, actor: { id: "anonymous", name: "Browser" } },
+        { stream: input.sessionId, actor: { id: "anonymous", name: "Browser", role: "user" } },
         { action: input.action, productId: input.productId, quantity: input.quantity }
       );
       return { success: true };
