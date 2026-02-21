@@ -2,7 +2,13 @@
 
 An event-sourced shopping cart application built with the [@rotorsoft/act](https://github.com/Rotorsoft/act) framework. Demonstrates event sourcing patterns including aggregates, reactions, projections, and fire-and-forget tracking — all composed into a single application from independent domain slices.
 
-![Shop View](docs/shop-view.png)
+### User flow — browse, search, sign up, place order
+
+https://github.com/Rotorsoft/es-course/raw/refs/heads/master/docs/demo-user.mp4
+
+### Admin flow — orders, inventory management, marketing analytics
+
+https://github.com/Rotorsoft/es-course/raw/refs/heads/master/docs/demo-admin.mp4
 
 ## Prerequisites
 
@@ -35,16 +41,31 @@ packages/
     cart.ts           Cart aggregate + CartSlice (reaction: auto-publish)
     inventory.ts      Inventory aggregate + projection + InventorySlice
     tracking.ts       CartTracking aggregate + projection + CartTrackingSlice
+    user.ts           User aggregate + projection + UserSlice
     orders.ts         Orders projection (read model)
     invariants.ts     Business rules (must be open)
     bootstrap.ts      Composes slices into the app
     index.ts          Public exports
   domain/test/
-    cart.spec.ts      20 tests covering all slices
+    cart.spec.ts      22 tests — cart, inventory, orders, tracking slices
+    user.spec.ts      7 tests — user registration, roles, projection
   app/src/
-    api/index.ts      tRPC router (mutations, queries, SSE)
-    client/App.tsx    Single-file React app (5 views)
-    dev-server.ts     Dev server with seed data
+    api/
+      index.ts          Merges routers, exports appRouter type
+      trpc.ts           tRPC init + procedure levels (public, authed, admin)
+      context.ts        Request context with token verification
+      auth.ts           Token signing, password hashing (HMAC-SHA256)
+      auth.routes.ts    Auth endpoints (login, signup, Google OAuth, roles)
+      domain.routes.ts  Domain mutations + queries
+      events.routes.ts  SSE subscription for live events
+      helpers.ts        Event serialization, drain utilities, Google OAuth
+    client/
+      App.tsx           Root component — providers, layout, tab routing
+      data/products.ts  50-product catalog (10 categories)
+      components/       Header, CartDrawer, SubNav, EventPanel, ProductCard, ...
+      views/            ShopView, OrdersView, AdminView, MarketingView
+      hooks/            useAuth, useCart, useEventStream, usePlaceOrder, ...
+    dev-server.ts       Dev server with seed data (50 products, admin user)
 ```
 
 The monorepo has two packages:
@@ -56,9 +77,28 @@ The monorepo has two packages:
 
 ---
 
+## Auth
+
+Token-based authentication with HMAC-SHA256 signed JWTs (24-hour TTL).
+
+- **Local auth** — username/password signup and login
+- **Google OAuth** — optional, enabled via `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` env vars
+- **Roles** — `admin` (full access) and `user` (own orders only)
+- **Dev seed** — admin account pre-created (`admin` / `admin`)
+
+The API uses three tRPC procedure levels:
+
+| Procedure | Access |
+|-----------|--------|
+| `publicProcedure` | Anyone (product catalog, tracking, auth config) |
+| `authedProcedure` | Signed-in users (place orders, view own orders) |
+| `adminProcedure` | Admin role only (inventory management, user roles) |
+
+---
+
 ## Domain Slices
 
-The domain is built from three independent **slices**, each owning its own aggregate, events, state, and projections. Each slice is self-contained in its own file and composed in `bootstrap.ts`.
+The domain is built from four independent **slices**, each owning its own aggregate, events, state, and projections. Each slice is self-contained in its own file and composed in `bootstrap.ts`.
 
 ### Cart Slice (`cart.ts`)
 
@@ -200,6 +240,15 @@ export const CartTrackingSlice = slice()
   .build();
 ```
 
+### User Slice (`user.ts`)
+
+User identity and role management. Supports local registration and Google OAuth. The User projection maintains an in-memory read model keyed by email, with secondary indexes by provider ID.
+
+```
+RegisterUser ──► UserRegistered
+AssignRole   ──► RoleAssigned
+```
+
 ---
 
 ## Composition
@@ -212,11 +261,14 @@ import { act } from "@rotorsoft/act";
 import { CartSlice } from "./cart.js";
 import { InventorySlice } from "./inventory.js";
 import { CartTrackingSlice } from "./tracking.js";
+import { UserSlice } from "./user.js";
 
 export const app = act()
+  .withActor<AppActor>()
   .withSlice(CartSlice)
   .withSlice(InventorySlice)
   .withSlice(CartTrackingSlice)
+  .withSlice(UserSlice)
   .build();
 ```
 
@@ -226,53 +278,47 @@ export const app = act()
 ┌─────────────────────────────────────────────────────────┐
 │                      Event Store                        │
 │  (single append-only log, shared by all slices)         │
-└────────┬──────────────────┬───────────────────────┬─────┘
-         │                  │                       │
-    CartSlice         InventorySlice         CartTrackingSlice
-    ┌────────┐        ┌────────────┐         ┌──────────────┐
-    │ Cart   │        │ Inventory  │         │ CartTracking │
-    │ agg.   │        │ agg.       │         │ agg.         │
-    └───┬────┘        └─────┬──────┘         └──────┬───────┘
-        │                   │                       │
-        ▼                   ▼                       ▼
-   ┌─────────┐       ┌───────────┐          ┌───────────────┐
-   │ Orders  │       │ Inventory │          │ CartTracking  │
-   │ proj.   │       │ proj.     │          │ proj.         │
-   └─────────┘       └───────────┘          └───────────────┘
-        │                  │                       │
-        ▼                  ▼                       ▼
-   Orders View        Admin View            Marketing View
+└────────┬──────────────────┬──────────────┬──────────┬───┘
+         │                  │              │          │
+    CartSlice         InventorySlice  TrackingSlice  UserSlice
+    ┌────────┐        ┌────────────┐  ┌──────────┐  ┌──────┐
+    │ Cart   │        │ Inventory  │  │ Tracking │  │ User │
+    │ agg.   │        │ agg.       │  │ agg.     │  │ agg. │
+    └───┬────┘        └─────┬──────┘  └────┬─────┘  └──┬───┘
+        │                   │              │            │
+        ▼                   ▼              ▼            ▼
+   ┌─────────┐       ┌───────────┐  ┌──────────┐  ┌────────┐
+   │ Orders  │       │ Inventory │  │ Tracking │  │ User   │
+   │ proj.   │       │ proj.     │  │ proj.    │  │ proj.  │
+   └─────────┘       └───────────┘  └──────────┘  └────────┘
+        │                  │              │            │
+        ▼                  ▼              ▼            ▼
+   Orders View        Admin View    Marketing     Auth
 ```
 
 ---
 
 ## UI Views
 
-The React client is a single-file app (`App.tsx`) with five tabs and a live event log panel.
+The React client has five tabs and a live event log panel. The Shop tab is always visible. Orders requires sign-in. Admin and Marketing require the admin role.
+
+Product catalog: 50 items across 10 categories (Espresso, Brewing, Grinders, Kettles, Accessories, Beans, Cups & Mugs, Cleaning, Storage) with full-text search and category filtering.
 
 ### Shop
 
-Product catalog with live inventory counts and prices. Cart is fully local (React state). Only `PlaceOrder` talks to the server.
-
-![Shop View](docs/shop-view.png)
+Product catalog with live inventory counts and prices. Cart is fully local (React state). Search and category filter narrow the product grid. Only `PlaceOrder` talks to the server.
 
 ### Cart Drawer
 
-Slide-out cart with quantity controls. Each add/remove/clear fires a tracking event to the server (fire-and-forget).
-
-![Cart Drawer](docs/cart-drawer.png)
+Slide-out cart with quantity controls. Each add/remove/clear fires a tracking event to the server (fire-and-forget). Shows "Sign in to order" when not authenticated.
 
 ### Orders
 
-Read model materialized by the Orders projection from `CartSubmitted` and `CartPublished` events. Shows order status progression.
-
-![Orders View](docs/orders-view.png)
+Read model materialized by the Orders projection from `CartSubmitted` and `CartPublished` events. Regular users see their own orders; admins see all orders with actor IDs.
 
 ### Admin
 
-Inventory management — adjust prices and stock levels, or decommission products. Each action emits domain events that flow through projections.
-
-![Admin View](docs/admin-view.png)
+Inventory management — adjust prices and stock levels, or decommission products. Each action emits domain events that flow through projections. Admin role required.
 
 ### Marketing
 
@@ -283,9 +329,7 @@ Analytics dashboard built from the CartTracking projection. Shows:
 - **Conversion Funnel** — sessions → adds → orders → abandoned
 - **Activity Timeline** — recent tracking events with timestamps
 
-Data updates live via SSE event invalidation.
-
-![Marketing View](docs/marketing-view.png)
+Data updates live via SSE event invalidation. Admin role required.
 
 ---
 
@@ -301,6 +345,8 @@ Every action in the system produces events that flow through the store:
 | `InventoryAdjusted` | Inventory aggregate | Inventory proj. |
 | `InventoryDecommissioned` | Inventory aggregate | Inventory proj. |
 | `CartActivityTracked` | CartTracking aggregate | CartTracking proj. |
+| `UserRegistered` | User aggregate | User proj. |
+| `RoleAssigned` | User aggregate | User proj. |
 
 The Event Log panel (right sidebar) shows every event in real time via SSE subscription.
 
@@ -308,28 +354,40 @@ The Event Log panel (right sidebar) shows every event in real time via SSE subsc
 
 ## API
 
-The tRPC router exposes mutations for commands, queries for read models, and an SSE subscription for live events.
+The tRPC router is split into three sub-routers: auth, domain, and events.
 
-**Mutations (commands):**
+**Auth routes (`auth.routes.ts`):**
 
-| Endpoint | Description |
-|----------|-------------|
-| `PlaceOrder` | Submit a complete order (drains reactions + projections) |
-| `ImportInventory` | Seed a product into inventory |
-| `AdjustInventory` | Update price/stock for a product |
-| `DecommissionInventory` | Remove a product from inventory |
-| `TrackCartActivity` | Fire-and-forget browsing event (no drain) |
+| Endpoint | Procedure | Description |
+|----------|-----------|-------------|
+| `getAuthConfig` | public | Available auth providers |
+| `login` | public | Sign in with username/password |
+| `signup` | public | Create a local account |
+| `loginWithGoogle` | public | Sign in / register via Google OAuth |
+| `me` | authed | Current user profile from token |
+| `assignRole` | admin | Change a user's role |
+| `listUsers` | admin | All registered users (sans password hashes) |
 
-**Queries (read models):**
+**Domain mutations (`domain.routes.ts`):**
 
-| Endpoint | Description |
-|----------|-------------|
-| `getProducts` | Live product list (prices + stock from Inventory projection) |
-| `getInventory` | Raw inventory map (all products) |
-| `listOrders` | All orders (from Orders projection) |
-| `getCartActivity` | Activity log (from CartTracking projection) |
+| Endpoint | Procedure | Description |
+|----------|-----------|-------------|
+| `PlaceOrder` | authed | Submit a complete order (drains reactions + projections) |
+| `ImportInventory` | admin | Seed a product into inventory |
+| `AdjustInventory` | admin | Update price/stock for a product |
+| `DecommissionInventory` | admin | Remove a product from inventory |
+| `TrackCartActivity` | public | Fire-and-forget browsing event (no drain) |
 
-**Subscription:**
+**Domain queries (`domain.routes.ts`):**
+
+| Endpoint | Procedure | Description |
+|----------|-----------|-------------|
+| `getProducts` | public | Live product list (prices + stock from Inventory projection) |
+| `getInventory` | public | Raw inventory map (all products) |
+| `listOrders` | authed | Own orders for users, all orders for admins |
+| `getCartActivity` | public | Activity log (from CartTracking projection) |
+
+**SSE subscription (`events.routes.ts`):**
 
 | Endpoint | Description |
 |----------|-------------|
@@ -339,7 +397,7 @@ The tRPC router exposes mutations for commands, queries for read models, and an 
 
 ## Testing
 
-20 tests cover all domain slices:
+29 tests across 2 test files cover all domain slices:
 
 ```sh
 pnpm test
@@ -351,6 +409,7 @@ Test structure:
 - **Inventory** — Import, adjust, decommission, cross-slice stock decrement on CartPublished
 - **Orders projection** — Materialization from CartSubmitted/CartPublished
 - **CartTracking** — Event emission, state accumulation, projection materialization, non-interference with order flow
+- **User** — Registration, role assignment, projection queries, duplicate prevention
 
 Tests use `store().seed()` for isolation and `app.correlate()` + `app.drain()` to process reactions and projections.
 
@@ -362,11 +421,11 @@ npx vitest run --coverage
 
 ---
 
-## Screenshots
+## Demo Video
 
-To regenerate screenshots (requires Playwright and a running dev server):
+To regenerate the demo videos (requires Playwright, ffmpeg, and a running dev server):
 
 ```sh
 pnpm dev &
-node docs/screenshots.mjs
+node docs/demo.mjs
 ```
