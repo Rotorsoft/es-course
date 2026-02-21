@@ -2,12 +2,10 @@ import { createContext, useCallback, useContext, useEffect, useState, type React
 import { trpc } from "../trpc.js";
 
 type AuthUser = {
-  email: string;
+  id: string;
   name: string;
   picture?: string;
   role: "admin" | "user";
-  provider: "local" | "google";
-  providerId: string;
 };
 
 type AuthContextValue = {
@@ -104,7 +102,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // Restore session from stored token
   useEffect(() => {
     if (meQuery.data) {
-      setUser(meQuery.data);
+      setUser(meQuery.data as AuthUser);
       setLoading(false);
     } else if (meQuery.isError || !localStorage.getItem(TOKEN_KEY)) {
       if (meQuery.isError) localStorage.removeItem(TOKEN_KEY);
