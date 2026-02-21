@@ -8,6 +8,7 @@ import { useEventStream } from "./hooks/useEventStream.js";
 import { useToast } from "./hooks/useToast.js";
 import { useActivityTracker } from "./hooks/useActivityTracker.js";
 import { usePlaceOrder } from "./hooks/usePlaceOrder.js";
+import { useAuth, AuthProvider } from "./hooks/useAuth.js";
 import { Header } from "./components/Header.js";
 import { SubNav } from "./components/SubNav.js";
 import { EventPanel } from "./components/EventPanel.js";
@@ -33,6 +34,7 @@ function CartApp() {
   const { events, connected } = useEventStream();
   const { message: toastMsg, show: showToast } = useToast();
   const { track } = useActivityTracker();
+  const { isAdmin } = useAuth();
 
   const { submit, submitting, liveStock } = usePlaceOrder({
     cart,
@@ -56,8 +58,8 @@ function CartApp() {
           <SubNav activeTab={activeTab} onTabChange={setActiveTab} />
           {activeTab === "shop" && <ShopView onAdd={addItem} toast={showToast} />}
           {activeTab === "orders" && <OrdersView />}
-          {activeTab === "admin" && <AdminView />}
-          {activeTab === "marketing" && <MarketingView />}
+          {activeTab === "admin" && isAdmin && <AdminView />}
+          {activeTab === "marketing" && isAdmin && <MarketingView />}
         </div>
         <EventPanel events={events} connected={connected} />
       </div>
@@ -73,6 +75,11 @@ function CartApp() {
 
 const API_URL = "http://localhost:4000";
 
+function getAuthHeaders() {
+  const token = localStorage.getItem("auth_token");
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
 export default function App() {
   const [queryClient] = useState(() => new QueryClient());
   const [trpcClient] = useState(() =>
@@ -81,7 +88,7 @@ export default function App() {
         splitLink({
           condition: (op) => op.type === "subscription",
           true: httpSubscriptionLink({ url: API_URL }),
-          false: httpLink({ url: API_URL }),
+          false: httpLink({ url: API_URL, headers: getAuthHeaders }),
         }),
       ],
     })
@@ -90,7 +97,9 @@ export default function App() {
   return (
     <trpc.Provider client={trpcClient} queryClient={queryClient}>
       <QueryClientProvider client={queryClient}>
-        <CartApp />
+        <AuthProvider>
+          <CartApp />
+        </AuthProvider>
       </QueryClientProvider>
     </trpc.Provider>
   );

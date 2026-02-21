@@ -1,15 +1,70 @@
-import type { Target } from "@rotorsoft/act";
-import { app, getCartActivities, getInventoryItems, getOrders } from "@rotorsoft/es-course-domain";
-import { initTRPC, tracked } from "@trpc/server";
+import type { Actor, Target } from "@rotorsoft/act";
+import {
+  app,
+  getAllUsers,
+  getCartActivities,
+  getInventoryItems,
+  getOrders,
+  getOrdersByActor,
+  getUserByEmail,
+  getUserByProviderId,
+  type UserProfile,
+} from "@rotorsoft/es-course-domain";
+import { initTRPC, tracked, TRPCError } from "@trpc/server";
 import { EventEmitter } from "node:events";
 import { z } from "zod";
+import { hashPassword, signToken, verifyPassword, verifyToken } from "./auth.js";
 
-const t = initTRPC.create();
+// === Context ===
 
-const userTarget = (stream?: string): Target => ({
-  stream: stream ?? crypto.randomUUID(),
-  actor: { id: "user-1", name: "User" },
+export type Context = {
+  user: UserProfile | null;
+  actor: Readonly<Actor>;
+};
+
+export function createContext({ req }: { req: { headers: Record<string, string | string[] | undefined> } }): Context {
+  const auth = req.headers["authorization"];
+  const token = typeof auth === "string" && auth.startsWith("Bearer ") ? auth.slice(7) : null;
+
+  if (token) {
+    const payload = verifyToken(token);
+    if (payload) {
+      const user = getUserByEmail(payload.email) ?? null;
+      if (user) {
+        return {
+          user,
+          actor: { id: user.email, name: user.name },
+        };
+      }
+    }
+  }
+
+  return {
+    user: null,
+    actor: { id: "anonymous", name: "Anonymous" },
+  };
+}
+
+// === tRPC setup ===
+
+const t = initTRPC.context<Context>().create();
+
+const isAuthenticated = t.middleware(({ ctx, next }) => {
+  if (!ctx.user) throw new TRPCError({ code: "UNAUTHORIZED", message: "Not authenticated" });
+  return next({ ctx: { ...ctx, user: ctx.user } });
 });
+
+const isAdmin = t.middleware(({ ctx, next }) => {
+  if (!ctx.user) throw new TRPCError({ code: "UNAUTHORIZED", message: "Not authenticated" });
+  if (ctx.user.role !== "admin") throw new TRPCError({ code: "FORBIDDEN", message: "Admin access required" });
+  return next({ ctx: { ...ctx, user: ctx.user } });
+});
+
+const publicProcedure = t.procedure;
+const authedProcedure = t.procedure.use(isAuthenticated);
+const adminProcedure = t.procedure.use(isAdmin);
+
+// === Helpers ===
 
 type SerializedEvent = {
   id: number;
@@ -39,9 +94,6 @@ function serializeEvents(events: Array<{ id: number; name: unknown; data: unknow
   }));
 }
 
-// Drain reactions and projections — two passes:
-// 1. CartSubmitted → ReserveStock + PublishCart (single reaction)
-// 2. Projections (orders, inventory read models)
 async function drainAll() {
   for (let i = 0; i < 2; i++) {
     const { leased } = await app.correlate({ after: -1, limit: 100 });
@@ -55,9 +107,125 @@ const eventBus = new EventEmitter();
 eventBus.setMaxListeners(100);
 app.on("committed", () => eventBus.emit("committed"));
 
+// Google OAuth client (lazy-loaded)
+let googleClient: import("google-auth-library").OAuth2Client | null = null;
+function getGoogleClient() {
+  if (!googleClient && process.env.GOOGLE_CLIENT_ID) {
+    const { OAuth2Client } = require("google-auth-library") as typeof import("google-auth-library");
+    googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
+  }
+  return googleClient;
+}
+
+// === Router ===
+
 export const router = t.router({
-  // Place a complete order in one call
-  PlaceOrder: t.procedure
+  // --- Auth procedures ---
+
+  getAuthConfig: publicProcedure.query(() => {
+    const providers: ("local" | "google")[] = ["local"];
+    if (process.env.GOOGLE_CLIENT_ID) providers.push("google");
+    return { providers };
+  }),
+
+  login: publicProcedure
+    .input(z.object({ username: z.string(), password: z.string() }))
+    .mutation(async ({ input }) => {
+      // Look up user by providerId (username for local)
+      const user = getUserByProviderId(input.username);
+      if (!user || user.provider !== "local" || !user.passwordHash) {
+        throw new TRPCError({ code: "UNAUTHORIZED", message: "Invalid credentials" });
+      }
+      if (!verifyPassword(input.password, user.passwordHash)) {
+        throw new TRPCError({ code: "UNAUTHORIZED", message: "Invalid credentials" });
+      }
+      const token = signToken({ email: user.email });
+      const { passwordHash: _, ...profile } = user;
+      return { user: profile, token };
+    }),
+
+  signup: publicProcedure
+    .input(z.object({ username: z.string(), name: z.string(), password: z.string() }))
+    .mutation(async ({ input }) => {
+      const existing = getUserByEmail(input.username);
+      if (existing) {
+        throw new TRPCError({ code: "CONFLICT", message: "User already exists" });
+      }
+      const passwordHash = hashPassword(input.password);
+      const system: Target["actor"] = { id: "system", name: "AuthSystem" };
+      await app.do("RegisterUser", { stream: input.username, actor: system }, {
+        email: input.username,
+        name: input.name,
+        provider: "local",
+        providerId: input.username,
+        passwordHash,
+      });
+      await drainAll();
+      const user = getUserByEmail(input.username);
+      if (!user) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Failed to register user" });
+      const token = signToken({ email: user.email });
+      const { passwordHash: _, ...profile } = user;
+      return { user: profile, token };
+    }),
+
+  loginWithGoogle: publicProcedure
+    .input(z.object({ idToken: z.string() }))
+    .mutation(async ({ input }) => {
+      const client = getGoogleClient();
+      if (!client) throw new TRPCError({ code: "BAD_REQUEST", message: "Google SSO not configured" });
+
+      const ticket = await client.verifyIdToken({
+        idToken: input.idToken,
+        audience: process.env.GOOGLE_CLIENT_ID,
+      });
+      const payload = ticket.getPayload();
+      if (!payload || !payload.email || !payload.sub) {
+        throw new TRPCError({ code: "UNAUTHORIZED", message: "Invalid Google token" });
+      }
+
+      // Register if new
+      let user = getUserByEmail(payload.email);
+      if (!user) {
+        const system: Target["actor"] = { id: "system", name: "AuthSystem" };
+        await app.do("RegisterUser", { stream: payload.email, actor: system }, {
+          email: payload.email,
+          name: payload.name || payload.email,
+          picture: payload.picture,
+          provider: "google",
+          providerId: payload.sub,
+        });
+        await drainAll();
+        user = getUserByEmail(payload.email);
+      }
+      if (!user) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Failed to register user" });
+
+      const token = signToken({ email: user.email });
+      const { passwordHash: _, ...profile } = user;
+      return { user: profile, token };
+    }),
+
+  me: authedProcedure.query(({ ctx }) => {
+    const { passwordHash: _, ...profile } = ctx.user;
+    return profile;
+  }),
+
+  assignRole: adminProcedure
+    .input(z.object({ email: z.string(), role: z.enum(["admin", "user"]) }))
+    .mutation(async ({ input, ctx }) => {
+      const target = getUserByEmail(input.email);
+      if (!target) throw new TRPCError({ code: "NOT_FOUND", message: "User not found" });
+      await app.do("AssignRole", { stream: input.email, actor: ctx.actor }, { role: input.role });
+      await drainAll();
+      return { success: true };
+    }),
+
+  listUsers: adminProcedure.query(() => {
+    return getAllUsers().map(({ passwordHash: _, ...profile }) => profile);
+  }),
+
+  // --- Domain procedures ---
+
+  PlaceOrder: authedProcedure
     .input(
       z.object({
         items: z.array(
@@ -71,15 +239,18 @@ export const router = t.router({
         ),
       })
     )
-    .mutation(async ({ input }) => {
-      const target = userTarget();
+    .mutation(async ({ input, ctx }) => {
+      const target: Target = {
+        stream: crypto.randomUUID(),
+        actor: ctx.actor,
+      };
       await app.do("PlaceOrder", target, { items: input.items });
       await drainAll();
       return { success: true, orderId: target.stream };
     }),
 
-  // Inventory commands
-  ImportInventory: t.procedure
+  // Inventory commands (admin only)
+  ImportInventory: adminProcedure
     .input(
       z.object({
         productId: z.string(),
@@ -88,17 +259,17 @@ export const router = t.router({
         quantity: z.number(),
       })
     )
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
       await app.do(
         "ImportInventory",
-        { stream: input.productId, actor: { id: "system", name: "System" } },
+        { stream: input.productId, actor: ctx.actor },
         input
       );
       await drainAll();
       return { success: true };
     }),
 
-  AdjustInventory: t.procedure
+  AdjustInventory: adminProcedure
     .input(
       z.object({
         productId: z.string(),
@@ -106,26 +277,26 @@ export const router = t.router({
         price: z.number(),
       })
     )
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
       await app.do(
         "AdjustInventory",
-        { stream: input.productId, actor: { id: "system", name: "System" } },
+        { stream: input.productId, actor: ctx.actor },
         input
       );
       await drainAll();
       return { success: true };
     }),
 
-  DecommissionInventory: t.procedure
+  DecommissionInventory: adminProcedure
     .input(
       z.object({
         productId: z.string(),
       })
     )
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
       await app.do(
         "DecommissionInventory",
-        { stream: input.productId, actor: { id: "system", name: "System" } },
+        { stream: input.productId, actor: ctx.actor },
         input
       );
       await drainAll();
@@ -133,7 +304,7 @@ export const router = t.router({
     }),
 
   // Cart activity tracking (fire-and-forget, no drain)
-  TrackCartActivity: t.procedure
+  TrackCartActivity: publicProcedure
     .input(
       z.object({
         sessionId: z.string(),
@@ -152,15 +323,15 @@ export const router = t.router({
     }),
 
   // Queries
-  getCartActivity: t.procedure.query(async () => {
+  getCartActivity: publicProcedure.query(async () => {
     return getCartActivities();
   }),
 
-  getInventory: t.procedure.query(async () => {
+  getInventory: publicProcedure.query(async () => {
     return getInventoryItems();
   }),
 
-  getProducts: t.procedure.query(async () => {
+  getProducts: publicProcedure.query(async () => {
     const items = getInventoryItems();
     const ids = ["prod-espresso", "prod-grinder", "prod-kettle", "prod-scale", "prod-filters"];
     return ids.map((id) => {
@@ -173,13 +344,12 @@ export const router = t.router({
     });
   }),
 
-  listOrders: t.procedure.query(async () => {
-    return getOrders();
+  listOrders: authedProcedure.query(async ({ ctx }) => {
+    return ctx.user.role === "admin" ? getOrders() : getOrdersByActor(ctx.user.email);
   }),
 
   // Subscription — push events via SSE
-  onEvent: t.procedure.subscription(async function*({ signal }) {
-    // Send all existing events first
+  onEvent: publicProcedure.subscription(async function*({ signal }) {
     const existing = await app.query_array({ after: -1 });
     for (const e of serializeEvents(existing)) {
       yield tracked(String(e.id), e);
@@ -187,7 +357,6 @@ export const router = t.router({
 
     let lastId = existing.length > 0 ? existing[existing.length - 1].id : -1;
 
-    // Stream new events as they are committed
     let notify: (() => void) | null = null;
     const onCommitted = () => {
       if (notify) {

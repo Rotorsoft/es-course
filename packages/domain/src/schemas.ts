@@ -99,3 +99,33 @@ export const CartActivityTracked = z.object({
 export const CartTrackingState = z.object({
   eventCount: z.number(),
 });
+
+// === User ===
+export const AuthProvider = z.enum(["local", "google"]);
+export const UserRole = z.enum(["admin", "user"]);
+
+// Actions
+export const RegisterUser = z.object({
+  email: z.string(),
+  name: z.string(),
+  picture: z.string().optional(),
+  provider: AuthProvider,
+  providerId: z.string(),
+  passwordHash: z.string().optional(),
+});
+export const AssignRole = z.object({ role: UserRole });
+
+// Events
+export const UserRegistered = RegisterUser;
+export const RoleAssigned = z.object({ role: UserRole });
+
+// State
+export const UserState = z.object({
+  email: z.string(),
+  name: z.string(),
+  picture: z.string().optional(),
+  role: UserRole,
+  provider: AuthProvider,
+  providerId: z.string(),
+  passwordHash: z.string().optional(),
+});

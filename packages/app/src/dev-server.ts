@@ -2,7 +2,8 @@ import { createHTTPServer } from "@trpc/server/adapters/standalone";
 import cors from "cors";
 import { app } from "@rotorsoft/es-course-domain";
 import type { Target } from "@rotorsoft/act";
-import { router } from "./api/index.js";
+import { router, createContext } from "./api/index.js";
+import { hashPassword } from "./api/auth.js";
 
 // Seed data for UI development
 async function seed() {
@@ -32,7 +33,18 @@ async function seed() {
     }],
   });
 
-  // Reaction + projections
+  // --- Seed admin user (admin/admin) ---
+  const adminHash = hashPassword("admin");
+  await app.do("RegisterUser", { stream: "admin", actor: system }, {
+    email: "admin",
+    name: "Admin",
+    provider: "local",
+    providerId: "admin",
+    passwordHash: adminHash,
+  });
+  await app.do("AssignRole", { stream: "admin", actor: system }, { role: "admin" });
+
+  // Drain reactions + projections
   for (let i = 0; i < 2; i++) {
     const { leased } = await app.correlate({ after: -1, limit: 100 });
     if (leased.length === 0) break;
@@ -42,10 +54,15 @@ async function seed() {
   console.log("Seeded dev data:");
   console.log(`  Order (published): ${order1}`);
   console.log(`  Products: ${products.map((p) => p.productId).join(", ")}`);
+  console.log(`  Admin user: admin/admin`);
 }
 
 // Start server
-const server = createHTTPServer({ middleware: cors(), router });
+const server = createHTTPServer({
+  middleware: cors({ origin: true, credentials: true }),
+  router,
+  createContext,
+});
 server.listen(4000);
 
 await seed();

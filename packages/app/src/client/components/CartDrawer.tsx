@@ -1,3 +1,4 @@
+import { useAuth } from "../hooks/useAuth.js";
 import { PRODUCTS } from "../data/products.js";
 
 const productMap = Object.fromEntries(PRODUCTS.map((p) => [p.productId, p]));
@@ -15,6 +16,7 @@ export function CartDrawer({
   submitting: boolean;
   liveStock: Record<string, number>;
 }) {
+  const { user } = useAuth();
   if (!open) return null;
 
   const entries = Object.entries(cart).filter(([, qty]) => qty > 0);
@@ -86,13 +88,22 @@ export function CartDrawer({
               <span>Subtotal ({totalItems} item{totalItems > 1 ? "s" : ""}):</span>
               <strong>${subtotal}</strong>
             </div>
-            <button
-              className="checkout-btn"
-              onClick={onSubmit}
-              disabled={submitting}
-            >
-              {submitting ? "Placing order..." : "Place Order"}
-            </button>
+            {user ? (
+              <button
+                className="checkout-btn"
+                onClick={onSubmit}
+                disabled={submitting}
+              >
+                {submitting ? "Placing order..." : "Place Order"}
+              </button>
+            ) : (
+              <button
+                className="checkout-btn"
+                onClick={onClose}
+              >
+                Sign in to order
+              </button>
+            )}
             <button className="clear-btn" onClick={onClear}>
               Clear cart
             </button>

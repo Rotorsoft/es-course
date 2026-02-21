@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { store, type Target } from "@rotorsoft/act";
-import { app, Cart, CartTracking, Inventory, getOrders, clearOrders, getInventoryItems, clearInventory, getCartActivities, clearCartActivities } from "../src/index.js";
+import { app, Cart, CartTracking, Inventory, getOrders, getOrdersByActor, clearOrders, getInventoryItems, clearInventory, getCartActivities, clearCartActivities } from "../src/index.js";
 
 const target = (stream = crypto.randomUUID()): Target => ({
   stream,
@@ -282,6 +282,40 @@ describe("Orders projection", () => {
     const o2 = orders.find((o) => o.id === t2.stream);
     expect(o1!.totalPrice).toBe(10.0);
     expect(o2!.totalPrice).toBe(20.0);
+  });
+
+  it("should capture actorId from event metadata", async () => {
+    const t = target();
+    await app.do("PlaceOrder", t, {
+      items: [sampleItem({ itemId: "i1", price: "10.00" })],
+    });
+    await drainAll();
+
+    const orders = getOrders();
+    const order = orders.find((o) => o.id === t.stream);
+    expect(order).toBeDefined();
+    expect(order!.actorId).toBe("user-1");
+  });
+
+  it("should filter orders by actorId with getOrdersByActor", async () => {
+    const t1: Target = { stream: crypto.randomUUID(), actor: { id: "alice@test.com", name: "Alice" } };
+    const t2: Target = { stream: crypto.randomUUID(), actor: { id: "bob@test.com", name: "Bob" } };
+    const t3: Target = { stream: crypto.randomUUID(), actor: { id: "alice@test.com", name: "Alice" } };
+    await app.do("PlaceOrder", t1, { items: [sampleItem({ itemId: "i1", price: "10.00" })] });
+    await app.do("PlaceOrder", t2, { items: [sampleItem({ itemId: "i2", price: "20.00" })] });
+    await app.do("PlaceOrder", t3, { items: [sampleItem({ itemId: "i3", price: "30.00" })] });
+    await drainAll();
+
+    const aliceOrders = getOrdersByActor("alice@test.com");
+    expect(aliceOrders).toHaveLength(2);
+    expect(aliceOrders.every((o) => o.actorId === "alice@test.com")).toBe(true);
+
+    const bobOrders = getOrdersByActor("bob@test.com");
+    expect(bobOrders).toHaveLength(1);
+    expect(bobOrders[0].actorId).toBe("bob@test.com");
+
+    const noOrders = getOrdersByActor("nobody@test.com");
+    expect(noOrders).toHaveLength(0);
   });
 });
 
