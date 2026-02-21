@@ -1,9 +1,11 @@
+import { useAuth } from "../hooks/useAuth.js";
 import { PRODUCTS } from "../data/products.js";
 import { trpc } from "../trpc.js";
 
 const productMap = Object.fromEntries(PRODUCTS.map((p) => [p.productId, p]));
 
 export function OrdersView() {
+  const { isAdmin } = useAuth();
   const orders = trpc.listOrders.useQuery();
 
   if (orders.isLoading) {
@@ -40,6 +42,9 @@ export function OrdersView() {
             <div key={order.id} className="order-card">
               <div className="order-header">
                 <span className="order-id">Order #{shortId}</span>
+                {isAdmin && order.actorId && (
+                  <span className="order-actor">{order.actorId}</span>
+                )}
                 <span className={`status-badge ${statusClass}`}>
                   {order.status}
                 </span>

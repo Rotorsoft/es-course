@@ -1,10 +1,12 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { store, type Target } from "@rotorsoft/act";
-import { app, Cart, CartTracking, Inventory, getOrders, clearOrders, getInventoryItems, clearInventory, getCartActivities, clearCartActivities } from "../src/index.js";
+import { store } from "@rotorsoft/act";
+import { app, Cart, CartTracking, Inventory, getOrders, getOrdersByActor, clearOrders, getInventoryItems, clearInventory, getCartActivities, clearCartActivities, systemActor, type AppActor } from "../src/index.js";
 
-const target = (stream = crypto.randomUUID()): Target => ({
+const testUser: AppActor = { id: "user-1", name: "Test User", role: "user" };
+
+const target = (stream = crypto.randomUUID()) => ({
   stream,
-  actor: { id: "user-1", name: "Test User" },
+  actor: testUser,
 });
 
 const sampleItem = (overrides: Partial<{ itemId: string; productId: string; name: string; price: string; description: string }> = {}) => ({
@@ -98,7 +100,7 @@ describe("Inventory projection", () => {
   });
 
   it("should materialize from InventoryImported events", async () => {
-    const system = { stream: "prod-1", actor: { id: "system", name: "System" } };
+    const system = { stream: "prod-1", actor: systemActor };
     await app.do("ImportInventory", system, {
       name: "Widget",
       price: 9.99,
@@ -115,7 +117,7 @@ describe("Inventory projection", () => {
   });
 
   it("should track multiple products", async () => {
-    const sys = (id: string) => ({ stream: id, actor: { id: "system", name: "System" } });
+    const sys = (id: string) => ({ stream: id, actor: systemActor });
     await app.do("ImportInventory", sys("prod-1"), { name: "Widget", price: 9.99, quantity: 50, productId: "prod-1" });
     await app.do("ImportInventory", sys("prod-2"), { name: "Gadget", price: 19.99, quantity: 30, productId: "prod-2" });
     await drainAll();
@@ -127,7 +129,7 @@ describe("Inventory projection", () => {
   });
 
   it("should decrement stock on CartPublished", async () => {
-    const sys = (id: string) => ({ stream: id, actor: { id: "system", name: "System" } });
+    const sys = (id: string) => ({ stream: id, actor: systemActor });
     await app.do("ImportInventory", sys("prod-1"), { name: "Widget", price: 9.99, quantity: 10, productId: "prod-1" });
     await drainAll();
 
@@ -142,7 +144,7 @@ describe("Inventory projection", () => {
   });
 
   it("should decrement multiple items of same product in one order", async () => {
-    const sys = (id: string) => ({ stream: id, actor: { id: "system", name: "System" } });
+    const sys = (id: string) => ({ stream: id, actor: systemActor });
     await app.do("ImportInventory", sys("prod-1"), { name: "Widget", price: 9.99, quantity: 10, productId: "prod-1" });
     await drainAll();
 
@@ -160,7 +162,7 @@ describe("Inventory projection", () => {
   });
 
   it("should not go below zero", async () => {
-    const sys = (id: string) => ({ stream: id, actor: { id: "system", name: "System" } });
+    const sys = (id: string) => ({ stream: id, actor: systemActor });
     await app.do("ImportInventory", sys("prod-1"), { name: "Widget", price: 9.99, quantity: 1, productId: "prod-1" });
     await drainAll();
 
@@ -178,7 +180,7 @@ describe("Inventory projection", () => {
   });
 
   it("should update quantity on AdjustInventory (admin update)", async () => {
-    const sys = (id: string) => ({ stream: id, actor: { id: "system", name: "System" } });
+    const sys = (id: string) => ({ stream: id, actor: systemActor });
     await app.do("ImportInventory", sys("prod-1"), { name: "Widget", price: 9.99, quantity: 10, productId: "prod-1" });
     await drainAll();
 
@@ -192,7 +194,7 @@ describe("Inventory projection", () => {
   });
 
   it("should remove item on DecommissionInventory", async () => {
-    const sys = (id: string) => ({ stream: id, actor: { id: "system", name: "System" } });
+    const sys = (id: string) => ({ stream: id, actor: systemActor });
     await app.do("ImportInventory", sys("prod-1"), { name: "Widget", price: 9.99, quantity: 10, productId: "prod-1" });
     await app.do("ImportInventory", sys("prod-2"), { name: "Gadget", price: 19.99, quantity: 5, productId: "prod-2" });
     await drainAll();
@@ -209,7 +211,7 @@ describe("Inventory projection", () => {
   });
 
   it("should allow re-importing a decommissioned item", async () => {
-    const sys = (id: string) => ({ stream: id, actor: { id: "system", name: "System" } });
+    const sys = (id: string) => ({ stream: id, actor: systemActor });
     await app.do("ImportInventory", sys("prod-1"), { name: "Widget", price: 9.99, quantity: 10, productId: "prod-1" });
     await drainAll();
 
@@ -282,6 +284,42 @@ describe("Orders projection", () => {
     const o2 = orders.find((o) => o.id === t2.stream);
     expect(o1!.totalPrice).toBe(10.0);
     expect(o2!.totalPrice).toBe(20.0);
+  });
+
+  it("should capture actorId from event metadata", async () => {
+    const t = target();
+    await app.do("PlaceOrder", t, {
+      items: [sampleItem({ itemId: "i1", price: "10.00" })],
+    });
+    await drainAll();
+
+    const orders = getOrders();
+    const order = orders.find((o) => o.id === t.stream);
+    expect(order).toBeDefined();
+    expect(order!.actorId).toBe("user-1");
+  });
+
+  it("should filter orders by actorId with getOrdersByActor", async () => {
+    const alice: AppActor = { id: "alice@test.com", name: "Alice", role: "user" };
+    const bob: AppActor = { id: "bob@test.com", name: "Bob", role: "user" };
+    const t1 = { stream: crypto.randomUUID(), actor: alice };
+    const t2 = { stream: crypto.randomUUID(), actor: bob };
+    const t3 = { stream: crypto.randomUUID(), actor: alice };
+    await app.do("PlaceOrder", t1, { items: [sampleItem({ itemId: "i1", price: "10.00" })] });
+    await app.do("PlaceOrder", t2, { items: [sampleItem({ itemId: "i2", price: "20.00" })] });
+    await app.do("PlaceOrder", t3, { items: [sampleItem({ itemId: "i3", price: "30.00" })] });
+    await drainAll();
+
+    const aliceOrders = getOrdersByActor("alice@test.com");
+    expect(aliceOrders).toHaveLength(2);
+    expect(aliceOrders.every((o) => o.actorId === "alice@test.com")).toBe(true);
+
+    const bobOrders = getOrdersByActor("bob@test.com");
+    expect(bobOrders).toHaveLength(1);
+    expect(bobOrders[0].actorId).toBe("bob@test.com");
+
+    const noOrders = getOrdersByActor("nobody@test.com");
+    expect(noOrders).toHaveLength(0);
   });
 });
 

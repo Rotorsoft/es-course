@@ -3,8 +3,8 @@
   "type": "module",
   "version": "0.0.1",
   "scripts": {
-    "dev": "tsx watch src/dev-server.ts",
-    "dev:api": "tsx watch src/dev-server.ts",
+    "dev": "tsx watch --env-file=.env src/dev-server.ts",
+    "dev:api": "tsx watch --env-file=.env src/dev-server.ts",
     "dev:client": "vite --host",
     "build": "vite build && tsc -p tsconfig.server.json",
     "start": "node dist/server.js"
@@ -17,6 +17,7 @@
     "@trpc/react-query": "11.10.0",
     "@trpc/server": "11.10.0",
     "cors": "^2.8.6",
+    "google-auth-library": "^10.5.0",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
     "zod": "^4.3.6"
