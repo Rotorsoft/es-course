@@ -20,6 +20,14 @@
   grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
   gap: 20px;
 }
+.products-empty {
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 48px 24px;
+  text-align: center;
+  color: var(--text-secondary);
+  font-size: 15px;
+}
 .product-card {
   background: var(--card-bg);
   border-radius: 4px;

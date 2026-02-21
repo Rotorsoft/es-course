@@ -1,12 +1,21 @@
 import { useState } from "react";
 import { useAuth } from "../hooks/useAuth.js";
+import { CATEGORIES } from "../data/products.js";
 
 export function Header({
   itemCount,
   onCartOpen,
+  searchQuery,
+  onSearchChange,
+  searchCategory,
+  onCategoryChange,
 }: {
   itemCount: number;
   onCartOpen: () => void;
+  searchQuery: string;
+  onSearchChange: (q: string) => void;
+  searchCategory: string;
+  onCategoryChange: (c: string) => void;
 }) {
   const { user, signIn, signUp, signInWithGoogle, signOut, providers, error } = useAuth();
   const [modalOpen, setModalOpen] = useState(false);
@@ -48,8 +57,18 @@ export function Header({
           <span>{"\u2615"}</span> brew<span>cart</span>
         </a>
         <div className="header-search">
-          <select><option>All</option></select>
-          <input type="text" placeholder="Search coffee equipment..." />
+          <select value={searchCategory} onChange={(e) => onCategoryChange(e.target.value)}>
+            {CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
+          </select>
+          <input
+            type="text"
+            placeholder="Search coffee equipment..."
+            value={searchQuery}
+            onChange={(e) => onSearchChange(e.target.value)}
+          />
+          {searchQuery && (
+            <button className="search-clear" onClick={() => onSearchChange("")}>{"\u2715"}</button>
+          )}
           <button>{"\uD83D\uDD0D"}</button>
         </div>
 

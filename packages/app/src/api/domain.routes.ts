@@ -118,15 +118,11 @@ export const domainRouter = t.router({
 
   getProducts: publicProcedure.query(async () => {
     const items = getInventoryItems();
-    const ids = ["prod-espresso", "prod-grinder", "prod-kettle", "prod-scale", "prod-filters"];
-    return ids.map((id) => {
-      const inv = items[id];
-      return {
-        productId: id,
-        price: inv?.price ?? 0,
-        inventory: inv?.quantity ?? 0,
-      };
-    });
+    return Object.entries(items).map(([id, inv]) => ({
+      productId: id,
+      price: inv?.price ?? 0,
+      inventory: inv?.quantity ?? 0,
+    }));
   }),
 
   listOrders: authedProcedure.query(async ({ ctx }) => {

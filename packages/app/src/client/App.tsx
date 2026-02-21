@@ -30,6 +30,8 @@ import "./styles/marketing.css";
 function CartApp() {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<Tab>("shop");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchCategory, setSearchCategory] = useState("All");
   const { cart, addItem, increment, decrement, clear, setCart, itemCount } = useCart();
   const { events, connected } = useEventStream();
   const { message: toastMsg, show: showToast } = useToast();
@@ -54,9 +56,16 @@ function CartApp() {
     <>
       <div className="app-layout">
         <div className="app-main">
-          <Header itemCount={itemCount} onCartOpen={() => setDrawerOpen(true)} />
+          <Header
+            itemCount={itemCount}
+            onCartOpen={() => setDrawerOpen(true)}
+            searchQuery={searchQuery}
+            onSearchChange={setSearchQuery}
+            searchCategory={searchCategory}
+            onCategoryChange={setSearchCategory}
+          />
           <SubNav activeTab={activeTab} onTabChange={setActiveTab} />
-          {activeTab === "shop" && <ShopView onAdd={addItem} toast={showToast} />}
+          {activeTab === "shop" && <ShopView onAdd={addItem} toast={showToast} searchQuery={searchQuery} searchCategory={searchCategory} />}
           {activeTab === "orders" && <OrdersView />}
           {activeTab === "admin" && isAdmin && <AdminView />}
           {activeTab === "marketing" && isAdmin && <MarketingView />}

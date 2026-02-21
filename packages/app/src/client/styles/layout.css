@@ -61,6 +61,13 @@
   display: flex;
   align-items: center;
 }
+.header-search .search-clear {
+  background: transparent;
+  color: #999;
+  font-size: 14px;
+  padding: 0 8px;
+}
+.header-search .search-clear:hover { color: #333; }
 
 .cart-btn {
   background: none;
