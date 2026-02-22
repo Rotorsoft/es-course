@@ -29,18 +29,37 @@ export function serializeEvents(events: Array<{ id: number; name: unknown; data:
   }));
 }
 
-export async function drainAll() {
-  for (let i = 0; i < 2; i++) {
-    const { leased } = await app.correlate({ after: -1, limit: 100 });
-    if (leased.length === 0) return;
-    await app.drain({ streamLimit: 10, eventLimit: 100 });
-  }
-}
-
-// Local event bus for SSE subscriptions
+// Event bus for SSE — only signals AFTER reactions complete
 export const eventBus = new EventEmitter();
 eventBus.setMaxListeners(100);
-app.on("committed", () => eventBus.emit("committed"));
+
+// Debounced, non-blocking drain — coalesces rapid commits
+let drainTimer: ReturnType<typeof setTimeout> | null = null;
+let draining = false;
+
+async function executeDrain() {
+  if (draining) return;
+  draining = true;
+  try {
+    for (let i = 0; i < 2; i++) {
+      const { leased } = await app.correlate({ after: -1, limit: 100 });
+      if (leased.length === 0) break;
+      await app.drain({ streamLimit: 10, eventLimit: 100 });
+    }
+  } finally {
+    draining = false;
+  }
+  eventBus.emit("committed");
+}
+
+/** Non-blocking, debounced drain. Call after app.do() — returns immediately. */
+export function scheduleDrain() {
+  if (drainTimer) clearTimeout(drainTimer);
+  drainTimer = setTimeout(() => {
+    drainTimer = null;
+    executeDrain().catch(console.error);
+  }, 10);
+}
 
 // Google OAuth client (lazy-loaded)
 let googleClient: import("google-auth-library").OAuth2Client | null = null;

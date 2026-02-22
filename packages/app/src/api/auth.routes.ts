@@ -8,7 +8,7 @@ import {
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { hashPassword, signToken, verifyPassword } from "./auth.js";
-import { drainAll, getGoogleClient } from "./helpers.js";
+import { scheduleDrain, getGoogleClient } from "./helpers.js";
 import { t, publicProcedure, authedProcedure, adminProcedure } from "./trpc.js";
 
 export const authRouter = t.router({
@@ -47,7 +47,7 @@ export const authRouter = t.router({
         providerId: input.username,
         passwordHash,
       });
-      await drainAll();
+      scheduleDrain();
       const user = getUserByEmail(input.username);
       if (!user) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Failed to register user" });
       const token = signToken({ email: user.email });
@@ -79,7 +79,7 @@ export const authRouter = t.router({
           provider: "google",
           providerId: payload.sub,
         });
-        await drainAll();
+        scheduleDrain();
         user = getUserByEmail(payload.email);
       }
       if (!user) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Failed to register user" });
@@ -98,7 +98,7 @@ export const authRouter = t.router({
       const target = getUserByEmail(input.email);
       if (!target) throw new TRPCError({ code: "NOT_FOUND", message: "User not found" });
       await app.do("AssignRole", { stream: input.email, actor: ctx.actor }, { role: input.role });
-      await drainAll();
+      scheduleDrain();
       return { success: true };
     }),
 
