@@ -11,5 +11,5 @@ const server = createHTTPServer({
 const port = Number(process.env.PORT) || 4000;
 server.listen(port);
 
-await app.drain();
+await app.settle();
 console.log(`Server listening on http://localhost:${port}`);

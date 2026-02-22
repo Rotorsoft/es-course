@@ -27,6 +27,6 @@
     "vitest": "^4.0.18"
   },
   "dependencies": {
-    "@rotorsoft/act": "0.15.0"
+    "@rotorsoft/act": "0.16.0"
   }
 }

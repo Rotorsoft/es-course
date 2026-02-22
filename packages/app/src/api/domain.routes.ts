@@ -6,7 +6,6 @@ import {
   getOrdersByActor,
 } from "@rotorsoft/es-course-domain";
 import { z } from "zod";
-import { scheduleDrain } from "./helpers.js";
 import { t, publicProcedure, authedProcedure, adminProcedure } from "./trpc.js";
 
 export const domainRouter = t.router({
@@ -30,7 +29,7 @@ export const domainRouter = t.router({
         actor: ctx.actor,
       };
       await app.do("PlaceOrder", target, { items: input.items });
-      scheduleDrain();
+      app.settle();
       return { success: true, orderId: target.stream };
     }),
 
@@ -50,7 +49,7 @@ export const domainRouter = t.router({
         { stream: input.productId, actor: ctx.actor },
         input
       );
-      scheduleDrain();
+      app.settle();
       return { success: true };
     }),
 
@@ -68,7 +67,7 @@ export const domainRouter = t.router({
         { stream: input.productId, actor: ctx.actor },
         input
       );
-      scheduleDrain();
+      app.settle();
       return { success: true };
     }),
 
@@ -84,7 +83,7 @@ export const domainRouter = t.router({
         { stream: input.productId, actor: ctx.actor },
         input
       );
-      scheduleDrain();
+      app.settle();
       return { success: true };
     }),
 

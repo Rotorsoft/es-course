@@ -10,7 +10,7 @@
     "start": "node dist/server.js"
   },
   "dependencies": {
-    "@rotorsoft/act": "^0.14.0",
+    "@rotorsoft/act": "^0.16.0",
     "@rotorsoft/es-course-domain": "workspace:*",
     "@tanstack/react-query": "^5.90.21",
     "@trpc/client": "11.10.0",

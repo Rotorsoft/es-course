@@ -1,6 +1,6 @@
 import { app } from "@rotorsoft/es-course-domain";
 import { tracked } from "@trpc/server";
-import { eventBus, serializeEvents } from "./helpers.js";
+import { serializeEvents } from "./helpers.js";
 import { t, publicProcedure } from "./trpc.js";
 
 export const eventsRouter = t.router({
@@ -19,7 +19,10 @@ export const eventsRouter = t.router({
         notify = null;
       }
     };
-    eventBus.on("committed", onCommitted);
+    // Use "committed" — fires synchronously on every app.do(), including
+    // reaction commits during settle. "settled" fires only after the full
+    // settle loop completes which can lag several seconds with InMemoryStore.
+    app.on("committed", onCommitted);
 
     try {
       while (!signal?.aborted) {
@@ -36,7 +39,7 @@ export const eventsRouter = t.router({
         }
       }
     } finally {
-      eventBus.off("committed", onCommitted);
+      app.off("committed", onCommitted);
     }
   }),
 });
