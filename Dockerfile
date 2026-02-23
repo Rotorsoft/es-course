@@ -29,7 +29,7 @@ COPY . .
 RUN pnpm run build
 
 # Prune dev dependencies after build
-RUN pnpm prune --prod
+RUN CI=true pnpm prune --prod
 
 
 # Final stage — only copy what's needed
