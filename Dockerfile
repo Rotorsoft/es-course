@@ -12,35 +12,48 @@ ARG PNPM_VERSION=10.29.3
 RUN npm install -g pnpm@$PNPM_VERSION
 
 
-# Build stage
+# Prod-deps stage — only production dependencies
+FROM base AS deps
+
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY packages/domain/package.json packages/domain/
+COPY packages/app/package.json packages/app/
+RUN pnpm install --frozen-lockfile --prod
+
+
+# Build stage — all dependencies (including dev)
 FROM base AS build
 
 RUN apt-get update -qq && \
     apt-get install --no-install-recommends -y build-essential node-gyp pkg-config python-is-python3
 
-# Install ALL dependencies (including dev) for building
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY packages/domain/package.json packages/domain/
 COPY packages/app/package.json packages/app/
 RUN pnpm install --frozen-lockfile
 
-# Copy source and build
 COPY . .
 RUN pnpm run build
 
-# Deploy production-only bundle (resolves workspace deps + prod deps)
-RUN pnpm --filter @rotorsoft/es-course-app deploy /prod
-# pnpm deploy skips gitignored dist/, so copy build output manually
-RUN cp -r packages/app/dist /prod/dist
 
-
-# Final stage — only copy what's needed
+# Final stage — prod deps + build output
 FROM base
 
-COPY --from=build /prod/package.json /app/packages/app/
-COPY --from=build /prod/node_modules /app/packages/app/node_modules
-COPY --from=build /prod/dist /app/packages/app/dist
+# Production node_modules (no dev deps)
+COPY --from=deps /app/node_modules /app/node_modules
+COPY --from=deps /app/packages/domain/node_modules /app/packages/domain/node_modules
+COPY --from=deps /app/packages/app/node_modules /app/packages/app/node_modules
 
-WORKDIR /app/packages/app
+# Workspace root
+COPY --from=build /app/package.json /app/pnpm-lock.yaml /app/pnpm-workspace.yaml /app/
+
+# Domain package — compiled JS output
+COPY --from=build /app/packages/domain/package.json /app/packages/domain/
+COPY --from=build /app/packages/domain/dist /app/packages/domain/dist
+
+# App package — compiled server + built client assets
+COPY --from=build /app/packages/app/package.json /app/packages/app/
+COPY --from=build /app/packages/app/dist /app/packages/app/dist
+
 EXPOSE 4000
-CMD [ "node", "dist/server.js" ]
+CMD [ "pnpm", "run", "start" ]
