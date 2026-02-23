@@ -28,26 +28,19 @@ RUN pnpm install --frozen-lockfile
 COPY . .
 RUN pnpm run build
 
-# Prune dev dependencies after build
-RUN CI=true pnpm prune --prod
+# Deploy production-only bundle (resolves workspace deps + prod deps)
+RUN pnpm --filter @rotorsoft/es-course-app deploy /prod
+# pnpm deploy skips gitignored dist/, so copy build output manually
+RUN cp -r packages/app/dist /prod/dist
 
 
 # Final stage — only copy what's needed
 FROM base
 
-# Workspace root
-COPY --from=build /app/package.json /app/pnpm-lock.yaml /app/pnpm-workspace.yaml /app/
-COPY --from=build /app/node_modules /app/node_modules
+COPY --from=build /prod/package.json /app/packages/app/
+COPY --from=build /prod/node_modules /app/packages/app/node_modules
+COPY --from=build /prod/dist /app/packages/app/dist
 
-# Domain package — compiled JS output
-COPY --from=build /app/packages/domain/package.json /app/packages/domain/
-COPY --from=build /app/packages/domain/dist /app/packages/domain/dist
-COPY --from=build /app/packages/domain/node_modules /app/packages/domain/node_modules
-
-# App package — compiled server + built client assets
-COPY --from=build /app/packages/app/package.json /app/packages/app/
-COPY --from=build /app/packages/app/dist /app/packages/app/dist
-COPY --from=build /app/packages/app/node_modules /app/packages/app/node_modules
-
+WORKDIR /app/packages/app
 EXPOSE 4000
-CMD [ "pnpm", "run", "start" ]
+CMD [ "node", "dist/server.js" ]
